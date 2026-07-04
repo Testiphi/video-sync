@@ -386,6 +386,22 @@ def sync_range():
 
 # ---- Cleanup ----
 
+@app.route("/api/unload-video/<label>", methods=["POST"])
+def unload_video(label):
+    """Unload a single video by its label (a or b)."""
+    if label not in ("a", "b"):
+        return jsonify({"status": "error", "message": "Invalid label"}), 400
+
+    sid = get_session()
+    vids = session_videos.get(sid, {})
+    vid = vids.get(label)
+    if vid and vid in indexers:
+        idx = indexers.pop(vid)
+        idx.close()
+    vids[label] = None
+    return jsonify({"status": "ok"})
+
+
 @app.route("/api/reset", methods=["POST"])
 def reset():
     sid = get_session()

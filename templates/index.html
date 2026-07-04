@@ -464,10 +464,10 @@ async function loadVideo(label) {
       `${info.width}×${info.height} · ${info.fps}fps · ` +
       `${info.frame_count}帧 · ${info.duration.toFixed(1)}s`;
 
-    document.getElementById(`path-${label}`).disabled = true;
-    btn.textContent = '✅ 已加载';
-    btn.disabled = true;
     document.getElementById(`panel-${label}`).classList.add('loaded');
+    btn.textContent = '🔄 重新选择';
+    btn.onclick = function() { unloadVideo(label); };
+    btn.disabled = false;
 
     updateStepIndicators();
     showROISection();
@@ -475,7 +475,53 @@ async function loadVideo(label) {
     alert('请求失败: ' + e.message);
     btn.disabled = false;
     btn.textContent = '加载';
+    btn.onclick = function() { loadVideo(label); };
   }
+}
+
+async function unloadVideo(label) {
+  // Ask confirmation if calibration was done
+  if (calState[label].length > 0 && calState[label].some(c => c.timer)) {
+    if (!confirm('确定重新选择视频？当前的校准数据将丢失。')) return;
+  }
+
+  try {
+    await fetch(`/api/unload-video/${label}`, { method: 'POST' });
+  } catch(e) {}
+
+  state[label] = null;
+  calState[label] = [];
+
+  // Reset panel UI
+  const panel = document.getElementById(`panel-${label}`);
+  panel.classList.remove('loaded');
+  document.getElementById(`path-${label}`).disabled = false;
+  document.getElementById(`path-${label}`).value = '';
+  document.getElementById(`meta-${label}`).innerHTML = '未加载';
+  document.getElementById(`roi-meta-${label}`).textContent = '未设置';
+  document.getElementById(`cal-meta-${label}`).textContent = '等待校准';
+  document.getElementById(`cal-body-${label}`).innerHTML = '';
+  document.getElementById(`build-${label}`).disabled = true;
+  document.getElementById(`build-${label}`).textContent = '构建索引';
+  document.getElementById(`ocr-${label}`).disabled = true;
+
+  // Restore load button
+  const loadBtn = document.querySelector(`#panel-${label} .row button:last-child`);
+  if (loadBtn) {
+    loadBtn.textContent = '加载';
+    loadBtn.onclick = function() { loadVideo(label); };
+    loadBtn.disabled = false;
+  }
+
+  // Hide ROI overlay
+  document.getElementById(`roi-overlay-${label}`).style.display = 'none';
+
+  // Hide sync viewer if any video changed
+  document.getElementById('viewer').classList.remove('active');
+
+  updateStepIndicators();
+  showROISection();
+  showCalSection();
 }
 
 // ────────────────────────────────────────
@@ -592,15 +638,22 @@ document.addEventListener('DOMContentLoaded', () => {
 let roiDrag = { active: false, label: null, startX: 0, startY: 0, endX: 0, endY: 0 };
 
 async function showROISection() {
-  if (!state.a || !state.b) return;
   document.getElementById('roi-section').style.display = 'grid';
-  document.getElementById('s2').classList.add('step-done');
 
-  // Load first frames for ROI selection
-  await loadROIFrame('a');
-  await loadROIFrame('b');
-  setupROIDrag('a');
-  setupROIDrag('b');
+  for (const label of ['a', 'b']) {
+    if (state[label]) {
+      await loadROIFrame(label);
+      setupROIDrag(label);
+      // Show this label's ROI panel
+      document.getElementById(`roi-preview-${label}`).closest('.panel').style.display = 'block';
+    } else {
+      // Hide this label's ROI panel when video not loaded
+      const roiPanel = document.getElementById(`roi-preview-${label}`).closest('.panel');
+      if (roiPanel) roiPanel.style.display = 'none';
+    }
+  }
+
+  document.getElementById('s2').classList.add('step-done');
 }
 
 async function loadROIFrame(label) {
@@ -705,12 +758,21 @@ function resetROI(label) {
 // Step 3: Calibration
 // ────────────────────────────────────────
 function showCalSection() {
-  if (!state.a || !state.b) return;
-  const metaA = document.getElementById('roi-meta-a').textContent;
-  const metaB = document.getElementById('roi-meta-b').textContent;
-  if (metaA === '未设置' || metaB === '未设置') return;
-  document.getElementById('cal-section').style.display = 'block';
-  document.getElementById('s3').classList.add('step-done');
+  // Show calibration panels for any loaded & ROI-set video
+  let anyReady = false;
+  for (const label of ['a', 'b']) {
+    const panel = document.getElementById(`cal-panel-${label}`);
+    if (state[label] && document.getElementById(`roi-meta-${label}`).textContent !== '未设置') {
+      panel.style.display = 'block';
+      anyReady = true;
+    } else {
+      panel.style.display = 'none';
+    }
+  }
+  if (anyReady) {
+    document.getElementById('cal-section').style.display = 'block';
+    document.getElementById('s3').classList.add('step-done');
+  }
 }
 
 async function autoSample(label) {
