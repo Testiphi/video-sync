@@ -89,6 +89,70 @@ def upload_video():
         "idx_id": None,  # Will be set by load-video
     })
 
+# ---- OCR (lazy reader) ----
+
+_ocr_reader = None
+
+def _get_ocr():
+    """Lazy-init EasyOCR reader (first call takes ~30s)."""
+    global _ocr_reader
+    if _ocr_reader is None:
+        import easyocr
+        _ocr_reader = easyocr.Reader(['en'], gpu=False)
+    return _ocr_reader
+
+
+@app.route("/api/video/<idx_id>/ocr-samples")
+def ocr_samples(idx_id):
+    """Run OCR on sample frames' timer ROI, return parsed timer values."""
+    idx = indexers.get(idx_id)
+    if not idx:
+        return jsonify({"status": "error", "message": "Not found"}), 404
+    if idx.roi is None:
+        return jsonify({"status": "error", "message": "ROI not set"}), 400
+
+    n = request.args.get("n", 6, type=int)
+    frames = idx.get_sample_frames(n)
+
+    reader = _get_ocr()
+    results = []
+
+    for frame_number in frames:
+        frame_img = idx.extract_frame(frame_number)
+        if frame_img is None:
+            results.append({"frame": frame_number, "status": "extract_failed"})
+            continue
+
+        h, w = frame_img.shape[:2]
+        x_pct, y_pct, w_pct, h_pct = idx.roi
+        x = int(w * x_pct / 100)
+        y = int(h * y_pct / 100)
+        rw = int(w * w_pct / 100)
+        rh = int(h * h_pct / 100)
+        roi = frame_img[y:y+rh, x:x+rw]
+
+        texts = reader.readtext(roi)
+        entry = {"frame": frame_number}
+
+        if texts:
+            bbox, raw_text, conf = texts[0]
+            entry["raw"] = raw_text
+            entry["confidence"] = round(conf, 3)
+            timer_sec = parse_timer_str(raw_text)
+            if timer_sec is not None:
+                entry["timer_seconds"] = round(timer_sec, 3)
+                entry["timer_str"] = format_timer(timer_sec)
+                entry["status"] = "ok"
+            else:
+                entry["status"] = "parse_failed"
+        else:
+            entry["status"] = "no_text"
+
+        results.append(entry)
+
+    return jsonify({"status": "ok", "reader_ready": _ocr_reader is not None, "results": results})
+
+
 @app.route("/api/load-video", methods=["POST"])
 def load_video():
     data = request.get_json()
