@@ -219,6 +219,23 @@
     background: #1e2533;
   }
   .step-done { background: rgba(52,211,153,0.15); color: var(--accent2); }
+
+  /* Drag-drop highlight */
+  .panel.dragover {
+    border-color: var(--accent);
+    background: rgba(79,140,255,0.06);
+    box-shadow: 0 0 0 2px rgba(79,140,255,0.25);
+  }
+  .panel.dragover .drop-hint { opacity: 1; }
+  .drop-hint {
+    opacity: 0.3;
+    transition: opacity .2s;
+    font-size: 12px; color: var(--accent);
+    text-align: center; padding: 6px 0;
+    border: 1px dashed var(--border);
+    border-radius: 6px; margin-top: 6px;
+  }
+  .panel.loaded .drop-hint { display: none; }
   
   @media (max-width: 900px) {
     .grid { grid-template-columns: 1fr; }
@@ -247,19 +264,29 @@
     <div class="panel" id="panel-a">
       <h2><span class="label-a">●</span> 视频 A</h2>
       <div class="row grow">
-        <input type="text" id="path-a" placeholder="视频文件路径，如 E:\Software\CapCut\Videos\0611.mp4">
+        <input type="text" id="path-a" placeholder="视频文件路径，如 E:\Software\CapCut\Videos\0611.mp4"
+               onkeydown="if(event.key==='Enter') loadVideo('a')">
+        <button class="secondary" onclick="browseFile('a')">📂 浏览</button>
         <button onclick="loadVideo('a')">加载</button>
       </div>
+      <div class="drop-hint" id="drop-hint-a">📁 拖放文件到此处</div>
       <div class="meta" id="meta-a">未加载</div>
+      <input type="file" id="file-input-a" accept=".mp4,.mov,.avi,.mkv,.webm"
+             style="display:none" onchange="handleFileSelect('a', this)">
     </div>
 
     <div class="panel" id="panel-b">
       <h2><span class="label-b">●</span> 视频 B</h2>
       <div class="row grow">
-        <input type="text" id="path-b" placeholder="视频文件路径">
+        <input type="text" id="path-b" placeholder="视频文件路径"
+               onkeydown="if(event.key==='Enter') loadVideo('b')">
+        <button class="secondary" onclick="browseFile('b')">📂 浏览</button>
         <button onclick="loadVideo('b')">加载</button>
       </div>
+      <div class="drop-hint" id="drop-hint-b">📁 拖放文件到此处</div>
       <div class="meta" id="meta-b">未加载</div>
+      <input type="file" id="file-input-b" accept=".mp4,.mov,.avi,.mkv,.webm"
+             style="display:none" onchange="handleFileSelect('b', this)">
     </div>
   </div>
 
@@ -438,6 +465,7 @@ async function loadVideo(label) {
     document.getElementById(`path-${label}`).disabled = true;
     btn.textContent = '✅ 已加载';
     btn.disabled = true;
+    document.getElementById(`panel-${label}`).classList.add('loaded');
 
     updateStepIndicators();
     showROISection();
@@ -447,6 +475,70 @@ async function loadVideo(label) {
     btn.textContent = '加载';
   }
 }
+
+// ────────────────────────────────────────
+// File Browse & Drag-Drop
+// ────────────────────────────────────────
+
+const DROP_HINT = { a: null, b: null };
+
+function browseFile(label) {
+  document.getElementById('file-input-' + label).click();
+}
+
+function handleFileSelect(label, input) {
+  const file = input.files[0];
+  if (!file) return;
+  // Chromium exposes file.path (full path); fallback to name
+  const path = file.path || file.name;
+  document.getElementById('path-' + label).value = path;
+  loadVideo(label);
+  input.value = '';  // reset so same file can be re-selected
+}
+
+function setupDragDrop(label) {
+  const panel = document.getElementById('panel-' + label);
+  const hint = document.getElementById('drop-hint-' + label);
+
+  panel.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    panel.classList.add('dragover');
+  });
+
+  panel.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    panel.classList.remove('dragover');
+  });
+
+  panel.addEventListener('drop', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    panel.classList.remove('dragover');
+
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+
+    let path = file.path || file.name;
+    // Check extension
+    const ext = path.split('.').pop().toLowerCase();
+    if (!['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(ext)) {
+      alert('不支持的视频格式: .' + ext + '（支持 mp4/mov/avi/mkv/webm）');
+      return;
+    }
+
+    document.getElementById('path-' + label).value = path;
+    loadVideo(label);
+  });
+}
+
+// Init drag-drop on load
+document.addEventListener('DOMContentLoaded', () => {
+  setupDragDrop('a');
+  setupDragDrop('b');
+});
+
 
 // ────────────────────────────────────────
 // Step 2: ROI Selection (with drag)
@@ -858,10 +950,26 @@ async function resetAll() {
 
   for (const label of ['a', 'b']) {
     document.getElementById(`path-${label}`).disabled = false;
-    document.getElementById(`path-${label}`).nextElementSibling.disabled = false;
-    document.getElementById(`path-${label}`).nextElementSibling.textContent = '加载';
+    document.getElementById(`panel-${label}`).classList.remove('loaded');
+    // Re-enable all buttons in the row
+    const btns = document.getElementById(`panel-${label}`).querySelectorAll('button');
+    btns.forEach(b => b.disabled = false);
+    // Restore load button text
+    const loadBtn = document.querySelector(`#panel-${label} .row button:last-child`);
+    if (loadBtn) loadBtn.textContent = '加载';
     document.getElementById(`meta-${label}`).innerHTML = '未加载';
     document.getElementById(`roi-meta-${label}`).textContent = '未设置';
+    document.getElementById(`cal-meta-${label}`).textContent = '等待校准';
+    document.getElementById(`cal-body-${label}`).innerHTML = '';
+    const buildBtn = document.getElementById(`build-${label}`);
+    if (buildBtn) { buildBtn.disabled = true; buildBtn.textContent = '构建索引'; }
+  }
+
+  for (const s of ['s1','s2','s3','s4']) {
+    document.getElementById(s).classList.remove('step-done');
+  }
+
+  location.reload();nt.getElementById(`roi-meta-${label}`).textContent = '未设置';
     document.getElementById(`cal-meta-${label}`).textContent = '等待校准';
     document.getElementById(`cal-body-${label}`).innerHTML = '';
     document.getElementById(`build-${label}`).disabled = true;
