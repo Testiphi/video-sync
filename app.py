@@ -13,6 +13,7 @@ from flask import (
 )
 from indexer import VideoIndexer, parse_timer_str, format_timer
 import uuid
+import cv2
 import numpy as np
 
 app = Flask(__name__)
@@ -110,6 +111,37 @@ def get_frame(idx_id, frame):
         return jsonify({"status": "error", "message": "Frame extraction failed"}), 500
 
     return Response(jpeg_bytes, mimetype="image/jpeg")
+
+
+@app.route("/api/video/<idx_id>/frame-timer/<int:frame>")
+def get_frame_timer_roi(idx_id, frame):
+    """Return the timer ROI region cropped and scaled up (~3x) for preview."""
+    idx = indexers.get(idx_id)
+    if not idx:
+        return jsonify({"status": "error", "message": "Not found"}), 404
+    if idx.roi is None:
+        # Fall back to full frame
+        return get_frame(idx_id, frame)
+
+    frame_img = idx.extract_frame(frame)
+    if frame_img is None:
+        return jsonify({"status": "error", "message": "Frame extraction failed"}), 500
+
+    h, w = frame_img.shape[:2]
+    x_pct, y_pct, w_pct, h_pct = idx.roi
+    x = int(w * x_pct / 100)
+    y = int(h * y_pct / 100)
+    rw = int(w * w_pct / 100)
+    rh = int(h * h_pct / 100)
+
+    # Crop and scale up 3x
+    roi = frame_img[y:y+rh, x:x+rw]
+    scaled = cv2.resize(roi, (rw * 3, rh * 3), interpolation=cv2.INTER_NEAREST)
+
+    success, jpeg = cv2.imencode('.jpg', scaled, [cv2.IMWRITE_JPEG_QUALITY, 90])
+    if success:
+        return Response(jpeg.tobytes(), mimetype="image/jpeg")
+    return jsonify({"status": "error", "message": "Encoding failed"}), 500
 
 
 # ---- ROI ----

@@ -381,6 +381,12 @@
   </div>
 </div>
 
+<!-- Zoom Modal -->
+<div id="zoom-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:9999;justify-content:center;align-items:center;flex-direction:column;cursor:pointer" onclick="closeZoom()">
+  <img id="zoom-img" src="" style="max-width:95vw;max-height:90vh;border-radius:8px;box-shadow:0 4px 40px rgba(0,0,0,0.5)">
+  <div style="color:#aaa;font-size:13px;margin-top:10px">点击任意位置关闭</div>
+</div>
+
 <script>
 // ────────────────────────────────────────
 // State
@@ -600,14 +606,20 @@ async function autoSample(label) {
       calState[label].push({ frame, timer: '' });
 
       const tr = document.createElement('tr');
-      const imgUrl = `/api/video/${idxId}/frame/${frame}?t=${Date.now()}`;
+      const timerImgUrl = `/api/video/${idxId}/frame-timer/${frame}?t=${Date.now()}`;
+      const fullImgUrl  = `/api/video/${idxId}/frame/${frame}?t=${Date.now()}`;
       tr.innerHTML = [
         '<td>#' + frame + '</td>',
-        '<td><img src="' + imgUrl + '" style="height:60px;border-radius:4px;cursor:pointer"',
-        '     onerror="this.style.display=\'none\'"',
-        '     onclick="setCalTimer(\'' + label + '\', ' + frame + ')"></td>',
+        '<td style="text-align:center">',
+        '  <img id="preview-' + label + '-' + frame + '" src="' + timerImgUrl + '"',
+        '       style="height:120px;border-radius:6px;cursor:pointer;background:#111"',
+        '       onerror="this.src=\'' + fullImgUrl + '\'"',
+        '       onclick="zoomPreview(\'' + fullImgUrl + '\', ' + frame + ', \'' + label + '\')"',
+        '       title="点击放大">',
+        '  <div style="font-size:10px;color:var(--text-dim);margin-top:2px">🖱 点击放大</div>',
+        '</td>',
         '<td><input type="text" id="cal-input-' + label + '-' + frame + '"',
-        '           placeholder="例 00:05.123"',
+        '           placeholder="例 00:05.123" style="width:110px"',
         '           onchange="updateCalTimer(\'' + label + '\', ' + frame + ', this.value)"></td>',
         '<td><span class="ok" id="cal-ok-' + label + '-' + frame + '">◌</span></td>'
       ].join('');
@@ -782,6 +794,25 @@ function resetOffset() {
   document.getElementById('offset-val').textContent = '+0';
   updateSyncView();
 }
+
+// ────────────────────────────────────────
+// Zoom Preview
+// ────────────────────────────────────────
+function zoomPreview(fullImgUrl, frame, label) {
+  const modal = document.getElementById('zoom-modal');
+  const img = document.getElementById('zoom-img');
+  // Add cache-busting
+  img.src = fullImgUrl + '&zoom=1';
+  modal.style.display = 'flex';
+}
+
+function closeZoom() {
+  document.getElementById('zoom-modal').style.display = 'none';
+}
+
+document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') closeZoom();
+});
 
 // ────────────────────────────────────────
 // Helpers
