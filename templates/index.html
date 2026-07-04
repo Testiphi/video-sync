@@ -572,35 +572,50 @@ async function autoSample(label) {
   const body = document.getElementById(`cal-body-${label}`);
   body.innerHTML = '<tr><td colspan="4" style="color:var(--text-dim);padding:12px;">加载中...</td></tr>';
 
+  const idxId = state[label];
+  if (!idxId) {
+    body.innerHTML = '<tr><td colspan="4" style="color:var(--danger);">错误: 视频未加载</td></tr>';
+    return;
+  }
+
   try {
-    const r = await fetch(`/api/video/${state[label]}/samples?n=5`);
+    const r = await fetch(`/api/video/${idxId}/samples?n=5`);
     const data = await r.json();
+    
+    if (data.status === 'error') {
+      body.innerHTML = `<tr><td colspan="4" style="color:var(--danger);">服务端错误: ${data.message}</td></tr>`;
+      return;
+    }
+    
     const frames = data.samples;
+    if (!Array.isArray(frames) || frames.length === 0) {
+      body.innerHTML = '<tr><td colspan="4" style="color:var(--danger);">未获取到采样帧</td></tr>';
+      return;
+    }
 
     body.innerHTML = '';
     calState[label] = [];
 
     for (const frame of frames) {
-      const tr = document.createElement('tr');
-      const timer = calState[label].find(c => c.frame === frame)?.timer || '';
       calState[label].push({ frame, timer: '' });
 
-      tr.innerHTML = `
-        <td>#${frame}</td>
-        <td><img src="/api/video/${state[label]}/frame/${frame}?t=${Date.now()}"
-                 style="height:60px;border-radius:4px;cursor:pointer"
-                 onclick="setCalTimer('${label}', ${frame})"></td>
-        <td><input type="text" id="cal-input-${label}-${frame}"
-                   placeholder="例 00:05.123"
-                   value="${timer}"
-                   onchange="updateCalTimer('${label}', ${frame}, this.value)"></td>
-        <td><span class="ok" id="cal-ok-${label}-${frame}">◌</span></td>
-      `;
+      const tr = document.createElement('tr');
+      const imgUrl = `/api/video/${idxId}/frame/${frame}?t=${Date.now()}`;
+      tr.innerHTML = [
+        '<td>#' + frame + '</td>',
+        '<td><img src="' + imgUrl + '" style="height:60px;border-radius:4px;cursor:pointer"',
+        '     onerror="this.style.display=\'none\'"',
+        '     onclick="setCalTimer(\'' + label + '\', ' + frame + ')"></td>',
+        '<td><input type="text" id="cal-input-' + label + '-' + frame + '"',
+        '           placeholder="例 00:05.123"',
+        '           onchange="updateCalTimer(\'' + label + '\', ' + frame + ', this.value)"></td>',
+        '<td><span class="ok" id="cal-ok-' + label + '-' + frame + '">◌</span></td>'
+      ].join('');
       body.appendChild(tr);
     }
     updateCalButton(label);
   } catch(e) {
-    body.innerHTML = `<tr><td colspan="4" style="color:var(--danger);">失败: ${e.message}</td></tr>`;
+    body.innerHTML = `<tr><td colspan="4" style="color:var(--danger);">请求失败: ${e.message}</td></tr>`;
   }
 }
 

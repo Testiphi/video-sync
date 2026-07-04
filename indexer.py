@@ -7,6 +7,7 @@ from scipy.interpolate import interp1d
 import re
 import os
 import json
+import threading
 
 
 def parse_timer_str(text):
@@ -78,9 +79,14 @@ class VideoIndexer:
         self.cache_dir = os.path.join(cache_dir, self.video_name)
         os.makedirs(self.cache_dir, exist_ok=True)
 
+        # Thread safety
+        self._lock = threading.Lock()
+
     def close(self):
-        if self.cap:
-            self.cap.release()
+        with self._lock:
+            if hasattr(self, 'cap') and self.cap:
+                self.cap.release()
+                self.cap = None
 
     def __del__(self):
         self.close()
@@ -105,23 +111,19 @@ class VideoIndexer:
     # ---- Frame extraction ----
 
     def extract_frame(self, frame_number):
-        """Extract a specific frame, returns BGR numpy array or None."""
+        """Extract a specific frame, returns BGR numpy array or None.
+        Thread-safe: creates a fresh VideoCapture per call to avoid
+        OpenCV's internal state corruption with concurrent reads.
+        """
         frame_number = max(0, min(frame_number, self.frame_count - 1))
-        self.cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
-        ret, frame = self.cap.read()
+        cap = cv2.VideoCapture(self.video_path)
+        if not cap.isOpened():
+            return None
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+        ret, frame = cap.read()
+        cap.release()
         if ret:
             return frame
-        return None
-
-    def extract_and_save(self, frame_number):
-        """Extract a frame and save to cache. Returns the path."""
-        cache_path = os.path.join(self.cache_dir, f"frame_{frame_number:06d}.jpg")
-        if os.path.exists(cache_path):
-            return cache_path
-        frame = self.extract_frame(frame_number)
-        if frame is not None:
-            cv2.imwrite(cache_path, frame, [cv2.IMWRITE_JPEG_QUALITY, 92])
-            return cache_path
         return None
 
     def get_frame_as_jpeg(self, frame_number):
