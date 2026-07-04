@@ -1,0 +1,833 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FrameSync — 视频同帧同步对比</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d28;
+    --border: #2a2d3a;
+    --accent: #4f8cff;
+    --accent2: #34d399;
+    --text: #e1e4eb;
+    --text-dim: #888ba0;
+    --danger: #f87171;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+    min-height: 100vh;
+  }
+  .app { max-width: 1600px; margin: 0 auto; padding: 16px 20px; }
+
+  header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 8px 0 16px;
+    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+  }
+  header h1 { font-size: 22px; font-weight: 700; }
+  header .tag {
+    font-size: 11px; background: var(--accent); color: #fff;
+    padding: 2px 8px; border-radius: 4px;
+  }
+  .badge { font-size: 12px; color: var(--text-dim); margin-left: auto; }
+
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+
+  .panel {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .panel h2 {
+    font-size: 15px; font-weight: 600; margin-bottom: 12px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .panel h2 .label-a { color: var(--accent); }
+  .panel h2 .label-b { color: var(--accent2); }
+
+  input[type="text"], input[type="number"] {
+    background: #12141e;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 8px 10px;
+    font-size: 13px;
+    width: 100%;
+    outline: none;
+    transition: border-color .2s;
+  }
+  input:focus { border-color: var(--accent); }
+
+  button {
+    background: var(--accent);
+    border: none;
+    border-radius: 6px;
+    color: #fff;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 8px 16px;
+    font-weight: 500;
+    transition: opacity .2s;
+  }
+  button:hover { opacity: .85; }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.danger { background: var(--danger); }
+  button.secondary { background: #2a2d3a; }
+  button.green { background: var(--accent2); color: #000; }
+
+  .row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+  .row.grow input { flex: 1; }
+  .meta {
+    font-size: 12px; color: var(--text-dim);
+    padding: 6px 0; line-height: 1.6;
+  }
+  .status-dot {
+    display: inline-block; width: 8px; height: 8px;
+    border-radius: 50%; margin-right: 6px;
+  }
+  .dot-ok { background: var(--accent2); }
+  .dot-warn { background: #fbbf24; }
+  .dot-err { background: var(--danger); }
+
+  .frame-preview {
+    margin: 8px 0;
+    border-radius: 6px; overflow: hidden;
+    position: relative;
+    background: #000;
+    aspect-ratio: auto;
+  }
+  .frame-preview img {
+    width: 100%;
+    display: block;
+    cursor: crosshair;
+    user-select: none;
+  }
+  .frame-preview .roi-overlay {
+    position: absolute; border: 2px solid var(--accent);
+    background: rgba(79,140,255,0.12);
+    pointer-events: none;
+    display: none;
+  }
+
+  /* Calibration table */
+  .cal-table {
+    width: 100%; border-collapse: collapse;
+    font-size: 12px; margin: 8px 0;
+  }
+  .cal-table th {
+    text-align: left; padding: 4px 8px;
+    color: var(--text-dim); font-weight: 500;
+    border-bottom: 1px solid var(--border);
+  }
+  .cal-table td {
+    padding: 4px 8px;
+    border-bottom: 1px solid #1e2533;
+  }
+  .cal-table td input { width: 120px; padding: 4px 6px; font-size: 12px; }
+  .cal-table .ok { color: var(--accent2); }
+  .cal-table .del { color: var(--danger); cursor: pointer; }
+
+  /* Sync viewer */
+  #viewer {
+    margin-top: 20px;
+    display: none;
+  }
+  #viewer.active { display: block; }
+
+  .viewer-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+  }
+  .viewer-frame {
+    background: #000; border-radius: 8px; overflow: hidden;
+    position: relative;
+  }
+  .viewer-frame img {
+    width: 100%; display: block;
+  }
+  .viewer-frame .frame-info {
+    position: absolute; bottom: 0; left: 0; right: 0;
+    background: rgba(0,0,0,0.7);
+    padding: 6px 10px;
+    font-size: 12px;
+    display: flex; justify-content: space-between;
+  }
+  .frame-info .fnum { color: var(--accent2); }
+  .frame-info .ftimer { color: #fbbf24; }
+
+  .slider-area {
+    padding: 12px 0;
+  }
+  .slider-area input[type="range"] {
+    width: 100%; height: 6px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--border);
+    border-radius: 3px;
+    outline: none;
+    cursor: pointer;
+  }
+  .slider-area input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: var(--accent);
+    cursor: pointer;
+    border: 2px solid #fff;
+  }
+  .slider-labels {
+    display: flex; justify-content: space-between;
+    font-size: 11px; color: var(--text-dim);
+    padding-top: 4px;
+  }
+  .current-time {
+    text-align: center;
+    font-size: 18px; font-weight: 600;
+    color: #fbbf24;
+    padding: 6px 0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Micro-adjust */
+  .micro-adjust {
+    display: flex; gap: 4px;
+    justify-content: center; align-items: center;
+    font-size: 12px; color: var(--text-dim);
+    padding: 6px 0;
+  }
+  .micro-adjust button {
+    padding: 2px 10px; font-size: 11px;
+    min-width: 32px;
+  }
+  .micro-adjust .offset-val {
+    min-width: 50px; text-align: center;
+    font-weight: 600; color: var(--accent2);
+  }
+  .micro-adjust .offset-label { color: var(--text-dim); }
+
+  .step-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    font-size: 11px; padding: 2px 8px;
+    border-radius: 10px;
+    background: #1e2533;
+  }
+  .step-done { background: rgba(52,211,153,0.15); color: var(--accent2); }
+  
+  @media (max-width: 900px) {
+    .grid { grid-template-columns: 1fr; }
+    .viewer-grid { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <h1>🎬 FrameSync</h1>
+    <span class="tag">MVP</span>
+    <span class="badge">视频同帧同步对比</span>
+  </header>
+
+  <!-- Step indicator -->
+  <div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;">
+    <span class="step-badge" id="s1">① 加载视频</span>
+    <span class="step-badge" id="s2">② 框选计时器</span>
+    <span class="step-badge" id="s3">③ 校准计时器</span>
+    <span class="step-badge" id="s4">④ 同步对比</span>
+  </div>
+
+  <!-- Step 1: Load videos -->
+  <div class="grid">
+    <div class="panel" id="panel-a">
+      <h2><span class="label-a">●</span> 视频 A</h2>
+      <div class="row grow">
+        <input type="text" id="path-a" placeholder="视频文件路径，如 E:\Software\CapCut\Videos\0611.mp4">
+        <button onclick="loadVideo('a')">加载</button>
+      </div>
+      <div class="meta" id="meta-a">未加载</div>
+    </div>
+
+    <div class="panel" id="panel-b">
+      <h2><span class="label-b">●</span> 视频 B</h2>
+      <div class="row grow">
+        <input type="text" id="path-b" placeholder="视频文件路径">
+        <button onclick="loadVideo('b')">加载</button>
+      </div>
+      <div class="meta" id="meta-b">未加载</div>
+    </div>
+  </div>
+
+  <!-- Step 2: ROI Selection -->
+  <div id="roi-section" style="display:none;" class="grid">
+    <div class="panel">
+      <h2>视频 A <span class="label-a">· 选区</span></h2>
+      <div class="frame-preview" id="roi-preview-a">
+        <img id="roi-img-a" src="" alt="点击框选计时器区域">
+        <div class="roi-overlay" id="roi-overlay-a"></div>
+      </div>
+      <div class="row">
+        <span style="font-size:12px;color:var(--text-dim)">
+          在图上拖拽框选计时器区域
+        </span>
+        <button class="secondary" onclick="useDefaultROI('a')">自动</button>
+        <button class="danger" onclick="resetROI('a')">重置</button>
+      </div>
+      <div class="meta" id="roi-meta-a">未设置</div>
+    </div>
+    <div class="panel">
+      <h2>视频 B <span class="label-b">· 选区</span></h2>
+      <div class="frame-preview" id="roi-preview-b">
+        <img id="roi-img-b" src="" alt="点击框选计时器区域">
+        <div class="roi-overlay" id="roi-overlay-b"></div>
+      </div>
+      <div class="row">
+        <span style="font-size:12px;color:var(--text-dim)">
+          在图上拖拽框选计时器区域
+        </span>
+        <button class="secondary" onclick="useDefaultROI('b')">自动</button>
+        <button class="danger" onclick="resetROI('b')">重置</button>
+      </div>
+      <div class="meta" id="roi-meta-b">未设置</div>
+    </div>
+  </div>
+
+  <!-- Step 3: Calibration -->
+  <div id="cal-section" style="display:none;">
+    <div class="grid">
+      <div class="panel" id="cal-panel-a">
+        <h2>视频 A <span class="label-a">· 校准</span></h2>
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">
+          查看采样帧，输入对应的计时器数值（格式如 00:05.123）
+        </div>
+        <table class="cal-table" id="cal-table-a">
+          <thead><tr><th>帧号</th><th>画面预览</th><th>计时器值</th><th></th></tr></thead>
+          <tbody id="cal-body-a"></tbody>
+        </table>
+        <div class="row">
+          <button onclick="autoSample('a')">采样5帧</button>
+          <button class="green" onclick="buildIndex('a')" id="build-a" disabled>构建索引</button>
+        </div>
+        <div class="meta" id="cal-meta-a">等待校准</div>
+      </div>
+      <div class="panel" id="cal-panel-b">
+        <h2>视频 B <span class="label-b">· 校准</span></h2>
+        <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">
+          查看采样帧，输入对应的计时器数值
+        </div>
+        <table class="cal-table" id="cal-table-b">
+          <thead><tr><th>帧号</th><th>画面预览</th><th>计时器值</th><th></th></tr></thead>
+          <tbody id="cal-body-b"></tbody>
+        </table>
+        <div class="row">
+          <button onclick="autoSample('b')">采样5帧</button>
+          <button class="green" onclick="buildIndex('b')" id="build-b" disabled>构建索引</button>
+        </div>
+        <div class="meta" id="cal-meta-b">等待校准</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 4: Sync Viewer -->
+  <div id="viewer">
+    <div class="panel">
+      <h2>🔄 同帧对比</h2>
+      <div class="viewer-grid">
+        <div class="viewer-frame">
+          <img id="sync-img-a" src="">
+          <div class="frame-info">
+            <span id="sync-name-a">—</span>
+            <span>帧 <span class="fnum" id="sync-fnum-a">0</span></span>
+            <span class="ftimer" id="sync-timer-a">00:00.000</span>
+          </div>
+        </div>
+        <div class="viewer-frame">
+          <img id="sync-img-b" src="">
+          <div class="frame-info">
+            <span id="sync-name-b">—</span>
+            <span>帧 <span class="fnum" id="sync-fnum-b">0</span></span>
+            <span class="ftimer" id="sync-timer-b">00:00.000</span>
+          </div>
+        </div>
+      </div>
+      <div class="current-time" id="current-timer">00:00.000</div>
+      <div class="slider-area">
+        <input type="range" id="sync-slider" min="0" max="1000" value="0" step="1"
+               oninput="onSliderChange(this.value)">
+        <div class="slider-labels">
+          <span id="slider-min">00:00.000</span>
+          <span id="slider-max">00:00.000</span>
+        </div>
+      </div>
+      <div class="micro-adjust">
+        <button onclick="fineTune(-5)">-5</button>
+        <button onclick="fineTune(-1)">-1</button>
+        <span class="offset-label">偏移</span>
+        <span class="offset-val" id="offset-val">+0</span>
+        <button onclick="fineTune(1)">+1</button>
+        <button onclick="fineTune(5)">+5</button>
+        <button class="secondary" onclick="resetOffset()">归零</button>
+      </div>
+    </div>
+  </div>
+
+  <div style="margin-top:20px;text-align:center;">
+    <button class="danger" onclick="resetAll()">🗑 重置全部</button>
+  </div>
+</div>
+
+<script>
+// ────────────────────────────────────────
+// State
+// ────────────────────────────────────────
+const state = { a: null, b: null };
+const calState = { a: [], b: [] };
+let syncTimer = 0;
+let syncTimerMin = 0;
+let syncTimerMax = 60;
+let syncSteps = 1000;
+let syncOffset = 0;  // offset in frames for video B
+
+// Default ROI based on our testing: 82-98%x, 8-22%y
+const DEFAULT_ROI = { x: 82, y: 8, w: 16, h: 14 };
+
+// ────────────────────────────────────────
+// Step 1: Load Video
+// ────────────────────────────────────────
+async function loadVideo(label) {
+  const pathEl = document.getElementById(`path-${label}`);
+  const path = pathEl.value.trim();
+  if (!path) { alert('请输入视频路径'); return; }
+
+  const btn = pathEl.nextElementSibling;
+  btn.disabled = true;
+  btn.textContent = '加载中...';
+
+  try {
+    const r = await fetch('/api/load-video', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({path, label})
+    });
+    const data = await r.json();
+    if (data.status !== 'ok') {
+      alert('加载失败: ' + data.message);
+      btn.disabled = false;
+      btn.textContent = '加载';
+      return;
+    }
+
+    state[label] = data.idx_id;
+    const info = data.video;
+    document.getElementById(`meta-${label}`).innerHTML =
+      `<span class="status-dot dot-ok"></span>${info.video_name} · ` +
+      `${info.width}×${info.height} · ${info.fps}fps · ` +
+      `${info.frame_count}帧 · ${info.duration.toFixed(1)}s`;
+
+    document.getElementById(`path-${label}`).disabled = true;
+    btn.textContent = '✅ 已加载';
+    btn.disabled = true;
+
+    updateStepIndicators();
+    showROISection();
+  } catch(e) {
+    alert('请求失败: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = '加载';
+  }
+}
+
+// ────────────────────────────────────────
+// Step 2: ROI Selection (with drag)
+// ────────────────────────────────────────
+let roiDrag = { active: false, label: null, startX: 0, startY: 0, endX: 0, endY: 0 };
+
+async function showROISection() {
+  if (!state.a || !state.b) return;
+  document.getElementById('roi-section').style.display = 'grid';
+  document.getElementById('s2').classList.add('step-done');
+
+  // Load first frames for ROI selection
+  await loadROIFrame('a');
+  await loadROIFrame('b');
+  setupROIDrag('a');
+  setupROIDrag('b');
+}
+
+async function loadROIFrame(label) {
+  if (!state[label]) return;
+  const firstFrame = 0;
+  const img = document.getElementById(`roi-img-${label}`);
+  img.src = `/api/video/${state[label]}/frame/${firstFrame}?t=${Date.now()}`;
+}
+
+function setupROIDrag(label) {
+  const img = document.getElementById(`roi-img-${label}`);
+  const overlay = document.getElementById(`roi-overlay-${label}`);
+  const container = document.getElementById(`roi-preview-${label}`);
+
+  function getCursorPos(e) {
+    const rect = container.getBoundingClientRect();
+    const x = (e.clientX - rect.left) / rect.width * 100;
+    const y = (e.clientY - rect.top) / rect.height * 100;
+    return { x: Math.max(0, Math.min(100, x)), y: Math.max(0, Math.min(100, y)) };
+  }
+
+  function updateOverlay() {
+    const x = Math.min(roiDrag.startX, roiDrag.endX);
+    const y = Math.min(roiDrag.startY, roiDrag.endY);
+    const w = Math.abs(roiDrag.endX - roiDrag.startX);
+    const h = Math.abs(roiDrag.endY - roiDrag.startY);
+    overlay.style.left = x + '%';
+    overlay.style.top = y + '%';
+    overlay.style.width = w + '%';
+    overlay.style.height = h + '%';
+    overlay.style.display = w > 0.5 && h > 0.5 ? 'block' : 'none';
+  }
+
+  img.addEventListener('mousedown', (e) => {
+    roiDrag.active = true;
+    roiDrag.label = label;
+    const pos = getCursorPos(e);
+    roiDrag.startX = roiDrag.endX = pos.x;
+    roiDrag.startY = roiDrag.endY = pos.y;
+    updateOverlay();
+  });
+
+  document.addEventListener('mousemove', (e) => {
+    if (!roiDrag.active || roiDrag.label !== label) return;
+    const pos = getCursorPos(e);
+    roiDrag.endX = pos.x;
+    roiDrag.endY = pos.y;
+    updateOverlay();
+  });
+
+  document.addEventListener('mouseup', async () => {
+    if (!roiDrag.active || roiDrag.label !== label) return;
+    roiDrag.active = false;
+
+    const x = Math.min(roiDrag.startX, roiDrag.endX);
+    const y = Math.min(roiDrag.startY, roiDrag.endY);
+    const w = Math.abs(roiDrag.endX - roiDrag.startX);
+    const h = Math.abs(roiDrag.endY - roiDrag.startY);
+
+    if (w < 1 || h < 1) return;
+
+    await sendROI(label, x, y, w, h);
+  });
+}
+
+async function sendROI(label, x, y, w, h) {
+  try {
+    await fetch(`/api/video/${state[label]}/roi`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({x, y, w, h})
+    });
+    document.getElementById(`roi-meta-${label}`).textContent =
+      `已设置: ${x.toFixed(1)}%x, ${y.toFixed(1)}%y, ${w.toFixed(1)}%w, ${h.toFixed(1)}%h`;
+    updateStepIndicators();
+    showCalSection();
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+async function useDefaultROI(label) {
+  const { x, y, w, h } = DEFAULT_ROI;
+  // Show overlay
+  const overlay = document.getElementById(`roi-overlay-${label}`);
+  overlay.style.left = x + '%';
+  overlay.style.top = y + '%';
+  overlay.style.width = w + '%';
+  overlay.style.height = h + '%';
+  overlay.style.display = 'block';
+  await sendROI(label, x, y, w, h);
+}
+
+function resetROI(label) {
+  const overlay = document.getElementById(`roi-overlay-${label}`);
+  overlay.style.display = 'none';
+  document.getElementById(`roi-meta-${label}`).textContent = '未设置';
+}
+
+// ────────────────────────────────────────
+// Step 3: Calibration
+// ────────────────────────────────────────
+function showCalSection() {
+  if (!state.a || !state.b) return;
+  const metaA = document.getElementById('roi-meta-a').textContent;
+  const metaB = document.getElementById('roi-meta-b').textContent;
+  if (metaA === '未设置' || metaB === '未设置') return;
+  document.getElementById('cal-section').style.display = 'block';
+  document.getElementById('s3').classList.add('step-done');
+}
+
+async function autoSample(label) {
+  const body = document.getElementById(`cal-body-${label}`);
+  body.innerHTML = '<tr><td colspan="4" style="color:var(--text-dim);padding:12px;">加载中...</td></tr>';
+
+  try {
+    const r = await fetch(`/api/video/${state[label]}/samples?n=5`);
+    const data = await r.json();
+    const frames = data.samples;
+
+    body.innerHTML = '';
+    calState[label] = [];
+
+    for (const frame of frames) {
+      const tr = document.createElement('tr');
+      const timer = calState[label].find(c => c.frame === frame)?.timer || '';
+      calState[label].push({ frame, timer: '' });
+
+      tr.innerHTML = `
+        <td>#${frame}</td>
+        <td><img src="/api/video/${state[label]}/frame/${frame}?t=${Date.now()}"
+                 style="height:60px;border-radius:4px;cursor:pointer"
+                 onclick="setCalTimer('${label}', ${frame})"></td>
+        <td><input type="text" id="cal-input-${label}-${frame}"
+                   placeholder="例 00:05.123"
+                   value="${timer}"
+                   onchange="updateCalTimer('${label}', ${frame}, this.value)"></td>
+        <td><span class="ok" id="cal-ok-${label}-${frame}">◌</span></td>
+      `;
+      body.appendChild(tr);
+    }
+    updateCalButton(label);
+  } catch(e) {
+    body.innerHTML = `<tr><td colspan="4" style="color:var(--danger);">失败: ${e.message}</td></tr>`;
+  }
+}
+
+function updateCalTimer(label, frame, val) {
+  const entry = calState[label].find(c => c.frame === frame);
+  if (entry) entry.timer = val.trim();
+  const ok = document.getElementById(`cal-ok-${label}-${frame}`);
+  ok.textContent = val.trim() ? '✓' : '◌';
+  ok.style.color = val.trim() ? 'var(--accent2)' : 'var(--text-dim)';
+  updateCalButton(label);
+}
+
+function setCalTimer(label, frame) {
+  // Click image to auto-open its input
+  const input = document.getElementById(`cal-input-${label}-${frame}`);
+  if (input) input.focus();
+}
+
+async function updateCalTimerToServer(label, frame, timerStr) {
+  if (!timerStr) return;
+  try {
+    await fetch(`/api/video/${state[label]}/calibrate`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({frame, timer: timerStr})
+    });
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+async function addAllCalPoints(label) {
+  for (const entry of calState[label]) {
+    if (entry.timer) {
+      await updateCalTimerToServer(label, entry.frame, entry.timer);
+    }
+  }
+}
+
+function updateCalButton(label) {
+  const count = calState[label].filter(c => c.timer).length;
+  const btn = document.getElementById(`build-${label}`);
+  btn.disabled = count < 2;
+  if (count >= 2) {
+    btn.textContent = `构建索引 (${count}个点)`;
+  } else {
+    btn.textContent = `需要至少2个点 (已${count}个)`;
+  }
+}
+
+async function buildIndex(label) {
+  await addAllCalPoints(label);
+  const btn = document.getElementById(`build-${label}`);
+  btn.disabled = true;
+  btn.textContent = '构建中...';
+
+  try {
+    const r = await fetch(`/api/video/${state[label]}/build-index`, { method: 'POST' });
+    const data = await r.json();
+    if (data.status !== 'ok') {
+      alert('索引失败: ' + data.message);
+      btn.disabled = false;
+      btn.textContent = '重试';
+      return;
+    }
+    document.getElementById(`cal-meta-${label}`).textContent =
+      `✅ 已索引: ${data.points}个校准点, 范围 ${data.timer_min.toFixed(3)}s ~ ${data.timer_max.toFixed(3)}s`;
+    btn.textContent = '✅ 已完成';
+    btn.disabled = true;
+
+    updateStepIndicators();
+    startSyncViewer();
+  } catch(e) {
+    alert('请求失败: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = '重试';
+  }
+}
+
+// ────────────────────────────────────────
+// Step 4: Sync Viewer
+// ────────────────────────────────────────
+async function startSyncViewer() {
+  // Check if both indexed
+  try {
+    const r = await fetch(`/api/sync-range?a=${state.a}&b=${state.b}`);
+    const data = await r.json();
+    if (data.status !== 'ok') return;
+
+    syncTimerMin = data.timer_min;
+    syncTimerMax = data.timer_max;
+    syncSteps = Math.min(2000, Math.max(100, data.timer_count || 1000));
+    syncTimer = syncTimerMin;
+    syncOffset = 0;
+
+    document.getElementById('viewer').classList.add('active');
+    document.getElementById('s4').classList.add('step-done');
+
+    const slider = document.getElementById('sync-slider');
+    slider.min = 0;
+    slider.max = syncSteps;
+    slider.value = 0;
+
+    document.getElementById('slider-min').textContent = formatTimer(syncTimerMin);
+    document.getElementById('slider-max').textContent = formatTimer(syncTimerMax);
+
+    // Get video names
+    const infoA = await (await fetch(`/api/video/${state.a}/info`)).json();
+    const infoB = await (await fetch(`/api/video/${state.b}/info`)).json();
+    document.getElementById('sync-name-a').textContent = infoA.video_name || 'A';
+    document.getElementById('sync-name-b').textContent = infoB.video_name || 'B';
+
+    // Load first frame
+    await updateSyncView();
+
+    // Start polling for slider
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+function onSliderChange(val) {
+  const pct = val / syncSteps;
+  syncTimer = syncTimerMin + (syncTimerMax - syncTimerMin) * pct;
+  document.getElementById('current-timer').textContent = formatTimer(syncTimer);
+  updateSyncView();
+}
+
+async function updateSyncView() {
+  try {
+    const r = await fetch(`/api/sync?timer=${syncTimer}&a=${state.a}&b=${state.b}`);
+    const data = await r.json();
+    if (data.status !== 'ok') return;
+
+    // Update frame A
+    let frameA = data.a.frame;
+    let frameB = data.b.frame + syncOffset;
+
+    // Load images
+    document.getElementById('sync-img-a').src =
+      `/api/video/${state.a}/frame/${frameA}?t=${Date.now()}`;
+    document.getElementById('sync-fnum-a').textContent = frameA;
+    document.getElementById('sync-timer-a').textContent = data.a.timer_str || '—';
+
+    document.getElementById('sync-img-b').src =
+      `/api/video/${state.b}/frame/${frameB}?t=${Date.now()}`;
+    document.getElementById('sync-fnum-b').textContent = frameB;
+    document.getElementById('sync-timer-b').textContent = data.b.timer_str || '—';
+
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+function fineTune(delta) {
+  syncOffset += delta;
+  document.getElementById('offset-val').textContent =
+    (syncOffset >= 0 ? '+' : '') + syncOffset;
+  updateSyncView();
+}
+
+function resetOffset() {
+  syncOffset = 0;
+  document.getElementById('offset-val').textContent = '+0';
+  updateSyncView();
+}
+
+// ────────────────────────────────────────
+// Helpers
+// ────────────────────────────────────────
+function formatTimer(sec) {
+  if (sec == null) return '--:--.---';
+  const mins = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  const ms = Math.floor((sec - Math.floor(sec)) * 1000);
+  return `${String(mins).padStart(2,'0')}:${String(s).padStart(2,'0')}.${String(ms).padStart(3,'0')}`;
+}
+
+function updateStepIndicators() {
+  const s1 = document.getElementById('s1');
+  const s2 = document.getElementById('s2');
+  const s3 = document.getElementById('s3');
+  const s4 = document.getElementById('s4');
+
+  if (state.a && state.b) {
+    s1.classList.add('step-done');
+    s2.classList.add('step-done');
+  }
+  if (state.a && state.b) {
+    // Check ROI
+  }
+}
+
+async function resetAll() {
+  if (!confirm('确定重置全部？')) return;
+
+  try {
+    await fetch('/api/reset', { method: 'POST' });
+  } catch(e) {}
+
+  state.a = state.b = null;
+  calState.a = [];
+  calState.b = [];
+  syncOffset = 0;
+
+  document.getElementById('viewer').classList.remove('active');
+  document.getElementById('roi-section').style.display = 'none';
+  document.getElementById('cal-section').style.display = 'none';
+
+  for (const label of ['a', 'b']) {
+    document.getElementById(`path-${label}`).disabled = false;
+    document.getElementById(`path-${label}`).nextElementSibling.disabled = false;
+    document.getElementById(`path-${label}`).nextElementSibling.textContent = '加载';
+    document.getElementById(`meta-${label}`).innerHTML = '未加载';
+    document.getElementById(`roi-meta-${label}`).textContent = '未设置';
+    document.getElementById(`cal-meta-${label}`).textContent = '等待校准';
+    document.getElementById(`cal-body-${label}`).innerHTML = '';
+    document.getElementById(`build-${label}`).disabled = true;
+    document.getElementById(`build-${label}`).textContent = '构建索引';
+  }
+
+  for (const s of ['s1','s2','s3','s4']) {
+    document.getElementById(s).classList.remove('step-done');
+  }
+
+  location.reload(); // simplest clean reset
+}
+</script>
+</body>
+</html>
