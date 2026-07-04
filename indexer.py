@@ -61,9 +61,16 @@ class VideoIndexer:
             raise ValueError(f"Cannot open video: {video_path}")
 
         self.fps = self.cap.get(cv2.CAP_PROP_FPS)
-        self.frame_count = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        raw_fc = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+        # Sanity-check frame count: OpenCV sometimes returns garbage (>100k)
+        if raw_fc > 50000 or (self.fps > 0 and raw_fc > self.fps * 120):
+            self.frame_count = self._find_real_frame_count()
+        else:
+            self.frame_count = raw_fc
+
         self.duration = self.frame_count / self.fps if self.fps > 0 else 0
 
         # Calibration: list of (frame_number, timer_seconds)
@@ -81,6 +88,22 @@ class VideoIndexer:
 
         # Thread safety
         self._lock = threading.Lock()
+
+    def _find_real_frame_count(self):
+        """Binary-search for the actual last readable frame (OpenCV can lie about count)."""
+        cap = cv2.VideoCapture(self.video_path)
+        lo, hi = 0, 200000
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            cap.set(cv2.CAP_PROP_POS_FRAMES, mid)
+            ret, _ = cap.read()
+            if ret:
+                lo = mid
+            else:
+                hi = mid - 1
+        cap.release()
+        print(f"[indexer] Corrected frame count: raw->{lo}")
+        return lo
 
     def close(self):
         with self._lock:

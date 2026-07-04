@@ -439,7 +439,8 @@ async function loadVideo(label) {
   const path = pathEl.value.trim();
   if (!path) { alert('请输入视频路径'); return; }
 
-  const btn = pathEl.nextElementSibling;
+  const btn = pathEl.parentElement.querySelector('button:last-child');
+  if (!btn) { alert('内部错误: 找不到加载按钮'); return; }
   btn.disabled = true;
   btn.textContent = '加载中...';
 
