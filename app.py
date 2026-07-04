@@ -259,13 +259,43 @@ def get_samples(idx_id):
         return jsonify({"status": "error", "message": "Not found"}), 404
 
     n = request.args.get("n", 6, type=int)
-    frames = idx.get_sample_frames(n)
+    frames = idx.get_sample_frames(n, jitter=True)
     return jsonify({
         "status": "ok",
         "frame_count": idx.frame_count,
         "fps": idx.fps,
         "samples": frames,
     })
+
+
+@app.route("/api/video/<idx_id>/random-frame")
+def get_random_frame(idx_id):
+    idx = indexers.get(idx_id)
+    if not idx:
+        return jsonify({"status": "error", "message": "Not found"}), 404
+
+    used_str = request.args.get("used", "")
+    used = set()
+    if used_str:
+        used = set(int(x) for x in used_str.split(",") if x.strip().isdigit())
+
+    frame = idx.get_random_frame(used=used)
+    return jsonify({"status": "ok", "frame": frame})
+
+
+@app.route("/api/video/<idx_id>/remove-point", methods=["POST"])
+def remove_calibration_point(idx_id):
+    idx = indexers.get(idx_id)
+    if not idx:
+        return jsonify({"status": "error", "message": "Not found"}), 404
+
+    data = request.get_json()
+    frame = data.get("frame")
+    if frame is None:
+        return jsonify({"status": "error", "message": "frame required"}), 400
+
+    idx.remove_calibration_point(frame)
+    return jsonify({"status": "ok", "points": len(idx.calibration_points)})
 
 
 @app.route("/api/video/<idx_id>/calibrate", methods=["POST"])

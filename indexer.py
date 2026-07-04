@@ -227,18 +227,49 @@ class VideoIndexer:
 
     # ---- Sampling ----
 
-    def get_sample_frames(self, n_samples=6):
-        """Get evenly-spaced frame numbers for calibration sampling."""
+    def get_sample_frames(self, n_samples=6, jitter=True):
+        """Get spaced frame numbers for calibration, with optional random jitter."""
         if self.frame_count == 0:
             return []
-        # Skip first few frames (loading screen) and last few (end screen)
         start = int(self.frame_count * 0.05)
         end = int(self.frame_count * 0.95)
         span = end - start
         if span <= 0:
             return list(range(0, self.frame_count, max(1, self.frame_count // n_samples)))
         step = span // (n_samples - 1) if n_samples > 1 else span
-        return [start + i * step for i in range(min(n_samples, n_samples))]
+
+        frames = [start + i * step for i in range(min(n_samples, n_samples))]
+
+        if jitter and step > 10:
+            import random
+            max_jitter = max(5, step // 5)
+            frames = [
+                min(end - 1, max(start, f + random.randint(-max_jitter, max_jitter)))
+                for f in frames
+            ]
+            # Ensure uniqueness
+            while len(set(frames)) < len(frames):
+                for i in range(len(frames)):
+                    if frames.count(frames[i]) > 1:
+                        frames[i] = random.randint(start, end - 1)
+
+        return frames
+
+    def get_random_frame(self, used=None):
+        """Return a random frame number not in the used set."""
+        import random
+        if self.frame_count == 0:
+            return 0
+        start = int(self.frame_count * 0.05)
+        end = int(self.frame_count * 0.95)
+        span = end - start
+        if span > 100:
+            for _ in range(50):
+                f = random.randint(start, end - 1)
+                if used is None or f not in used:
+                    return f
+        # Fallback: just take anything
+        return random.randint(start, end - 1)
 
     # ---- State serialization ----
 

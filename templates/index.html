@@ -345,7 +345,7 @@
           查看采样帧，输入对应的计时器数值（格式如 00:05.123）
         </div>
         <table class="cal-table" id="cal-table-a">
-          <thead><tr><th>帧号</th><th>画面预览</th><th>计时器值</th><th></th></tr></thead>
+          <thead><tr><th>帧号</th><th>画面预览</th><th>计时器值</th><th></th><th>操作</th></tr></thead>
           <tbody id="cal-body-a"></tbody>
         </table>
         <div class="row">
@@ -361,7 +361,7 @@
           查看采样帧，输入对应的计时器数值
         </div>
         <table class="cal-table" id="cal-table-b">
-          <thead><tr><th>帧号</th><th>画面预览</th><th>计时器值</th><th></th></tr></thead>
+          <thead><tr><th>帧号</th><th>画面预览</th><th>计时器值</th><th></th><th>操作</th></tr></thead>
           <tbody id="cal-body-b"></tbody>
         </table>
         <div class="row">
@@ -849,7 +849,7 @@ async function autoSample(label) {
       const timerImgUrl = `/api/video/${idxId}/frame-timer/${frame}?t=${Date.now()}`;
       const fullImgUrl  = `/api/video/${idxId}/frame/${frame}?t=${Date.now()}`;
       tr.innerHTML = [
-        '<td>#' + frame + '</td>',
+        '<td valign="middle" id="cal-fnum-' + label + '-' + frame + '">#' + frame + '</td>',
         '<td style="text-align:center">',
         '  <img id="preview-' + label + '-' + frame + '" src="' + timerImgUrl + '"',
         '       style="height:120px;border-radius:6px;cursor:pointer;background:#111"',
@@ -861,7 +861,13 @@ async function autoSample(label) {
         '<td><input type="text" id="cal-input-' + label + '-' + frame + '"',
         '           placeholder="例 00:05.123" style="width:110px"',
         '           onchange="updateCalTimer(\'' + label + '\', ' + frame + ', this.value)"></td>',
-        '<td><span class="ok" id="cal-ok-' + label + '-' + frame + '">◌</span></td>'
+        '<td><span class="ok" id="cal-ok-' + label + '-' + frame + '">◌</span></td>',
+        '<td style="white-space:nowrap">',
+        '  <button class="secondary" style="font-size:10px;padding:1px 6px"',
+        '          onclick="resampleFrame(\'' + label + '\', ' + frame + ')">🎲</button>',
+        '  <button class="danger"  style="font-size:10px;padding:1px 6px"',
+        '          onclick="removeCalRow(\'' + label + '\', ' + frame + ')">✕</button>',
+        '</td>'
       ].join('');
       body.appendChild(tr);
     }
@@ -908,6 +914,98 @@ async function ocrSample(label) {
   }
   btn.disabled = false;
   btn.textContent = 'OCR 识别';
+}
+
+async function resampleFrame(label, oldFrame) {
+  // Get a new random frame different from all current ones
+  const calRows = calState[label];
+  const used = calRows.map(r => r.frame);
+  // Include old frame in exclude list, so we get something different
+  const usedStr = used.join(',');
+  
+  try {
+    const r = await fetch(`/api/video/${state[label]}/random-frame?used=${usedStr}`);
+    const data = await r.json();
+    if (data.status !== 'ok') {
+      alert('获取随机帧失败: ' + data.message);
+      return;
+    }
+    const newFrame = data.frame;
+    
+    // Replace the old frame entry
+    const entry = calState[label].find(c => c.frame === oldFrame);
+    if (entry) {
+      entry.frame = newFrame;
+      entry.timer = '';
+    }
+    
+    // Remove old server calibration point for this frame
+    await fetch(`/api/video/${state[label]}/remove-point`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({frame: oldFrame})
+    });
+    
+    // Update the row in the DOM
+    const row = document.getElementById(`cal-fnum-${label}-${oldFrame}`).closest('tr');
+    const timerImgUrl = `/api/video/${state[label]}/frame-timer/${newFrame}?t=${Date.now()}`;
+    const fullImgUrl = `/api/video/${state[label]}/frame/${newFrame}?t=${Date.now()}`;
+    
+    // Update frame number cell
+    row.cells[0].textContent = '#' + newFrame;
+    row.cells[0].id = 'cal-fnum-' + label + '-' + newFrame;
+    
+    // Update preview image
+    const img = row.cells[1].querySelector('img');
+    img.id = 'preview-' + label + '-' + newFrame;
+    img.src = timerImgUrl;
+    img.onerror = function() { this.src = fullImgUrl; };
+    img.onclick = function() { zoomPreview(fullImgUrl, newFrame, label); };
+    
+    // Update input field
+    const inp = row.cells[2].querySelector('input');
+    inp.id = 'cal-input-' + label + '-' + newFrame;
+    inp.value = '';
+    inp.onchange = function() { updateCalTimer(label, newFrame, this.value); };
+    
+    // Update status
+    document.getElementById('cal-ok-' + label + '-' + oldFrame).id = 'cal-ok-' + label + '-' + newFrame;
+    document.getElementById('cal-ok-' + label + '-' + newFrame).textContent = '◌';
+    
+    // Update buttons
+    const btns = row.cells[4];
+    btns.innerHTML = [
+      '<button class="secondary" style="font-size:10px;padding:1px 6px"',
+      '        onclick="resampleFrame(\'' + label + '\', ' + newFrame + ')">🎲</button>',
+      '  <button class="danger"  style="font-size:10px;padding:1px 6px"',
+      '          onclick="removeCalRow(\'' + label + '\', ' + newFrame + ')">✕</button>'
+    ].join('');
+    
+    updateCalButton(label);
+  } catch(e) {
+    alert('重采样失败: ' + e.message);
+  }
+}
+
+function removeCalRow(label, frame) {
+  // Remove from state
+  calState[label] = calState[label].filter(c => c.frame !== frame);
+  
+  // Remove from server
+  fetch(`/api/video/${state[label]}/remove-point`, {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({frame: frame})
+  }).catch(() => {});
+  
+  // Remove from DOM
+  const cell = document.getElementById('cal-fnum-' + label + '-' + frame);
+  if (cell) {
+    const row = cell.closest('tr');
+    row.remove();
+  }
+  
+  updateCalButton(label);
 }
 
 function updateCalTimer(label, frame, val) {
