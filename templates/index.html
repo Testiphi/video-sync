@@ -298,6 +298,12 @@
         <img id="roi-img-a" src="" draggable="false" ondragstart="return false" alt="点击框选计时器区域">
         <div class="roi-overlay" id="roi-overlay-a"></div>
       </div>
+      <div class="row" style="gap:6px">
+        <span style="font-size:10px;color:var(--text-dim);white-space:nowrap" id="roi-fnum-a">帧 0</span>
+        <input type="range" id="roi-slider-a" min="0" max="100" value="0" style="flex:1;height:4px"
+               oninput="roiSeekFrame('a', this.value)">
+        <button class="secondary" style="font-size:11px;padding:3px 8px" onclick="roiRandomFrame('a')">🎲</button>
+      </div>
       <div class="row">
         <span style="font-size:12px;color:var(--text-dim)">
           在图上拖拽框选计时器区域
@@ -312,6 +318,12 @@
       <div class="frame-preview" id="roi-preview-b">
         <img id="roi-img-b" src="" draggable="false" ondragstart="return false" alt="点击框选计时器区域">
         <div class="roi-overlay" id="roi-overlay-b"></div>
+      </div>
+      <div class="row" style="gap:6px">
+        <span style="font-size:10px;color:var(--text-dim);white-space:nowrap" id="roi-fnum-b">帧 0</span>
+        <input type="range" id="roi-slider-b" min="0" max="100" value="0" style="flex:1;height:4px"
+               oninput="roiSeekFrame('b', this.value)">
+        <button class="secondary" style="font-size:11px;padding:3px 8px" onclick="roiRandomFrame('b')">🎲</button>
       </div>
       <div class="row">
         <span style="font-size:12px;color:var(--text-dim)">
@@ -645,6 +657,12 @@ async function showROISection() {
     if (state[label]) {
       await loadROIFrame(label);
       setupROIDrag(label);
+      // Init slider with frame count
+      const info = await (await fetch(`/api/video/${state[label]}/info`)).json();
+      const slider = document.getElementById(`roi-slider-${label}`);
+      slider.max = info.frame_count - 1;
+      slider.value = 0;
+      document.getElementById(`roi-fnum-${label}`).textContent = '帧 0 / ' + info.frame_count;
       // Show this label's ROI panel
       document.getElementById(`roi-preview-${label}`).closest('.panel').style.display = 'block';
     } else {
@@ -655,6 +673,26 @@ async function showROISection() {
   }
 
   document.getElementById('s2').classList.add('step-done');
+}
+
+async function roiSeekFrame(label, frameVal) {
+  const frame = parseInt(frameVal);
+  document.getElementById(`roi-fnum-${label}`).textContent = '帧 ' + frame;
+  document.getElementById(`roi-img-${label}`).src =
+    `/api/video/${state[label]}/frame/${frame}?t=${Date.now()}`;
+  // Clear overlay when navigating (old ROI may not apply)
+  document.getElementById(`roi-overlay-${label}`).style.display = 'none';
+}
+
+async function roiRandomFrame(label) {
+  const info = await (await fetch(`/api/video/${state[label]}/info`)).json();
+  const fc = info.frame_count;
+  // Pick a frame between 10% and 85% (skip loading/end screens)
+  const start = Math.floor(fc * 0.1);
+  const end = Math.floor(fc * 0.85);
+  const frame = start + Math.floor(Math.random() * (end - start));
+  document.getElementById(`roi-slider-${label}`).value = frame;
+  await roiSeekFrame(label, frame);
 }
 
 async function loadROIFrame(label) {
