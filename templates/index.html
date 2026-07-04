@@ -951,10 +951,8 @@ async function resetAll() {
   for (const label of ['a', 'b']) {
     document.getElementById(`path-${label}`).disabled = false;
     document.getElementById(`panel-${label}`).classList.remove('loaded');
-    // Re-enable all buttons in the row
     const btns = document.getElementById(`panel-${label}`).querySelectorAll('button');
     btns.forEach(b => b.disabled = false);
-    // Restore load button text
     const loadBtn = document.querySelector(`#panel-${label} .row button:last-child`);
     if (loadBtn) loadBtn.textContent = '加载';
     document.getElementById(`meta-${label}`).innerHTML = '未加载';
@@ -969,18 +967,7 @@ async function resetAll() {
     document.getElementById(s).classList.remove('step-done');
   }
 
-  location.reload();nt.getElementById(`roi-meta-${label}`).textContent = '未设置';
-    document.getElementById(`cal-meta-${label}`).textContent = '等待校准';
-    document.getElementById(`cal-body-${label}`).innerHTML = '';
-    document.getElementById(`build-${label}`).disabled = true;
-    document.getElementById(`build-${label}`).textContent = '构建索引';
-  }
-
-  for (const s of ['s1','s2','s3','s4']) {
-    document.getElementById(s).classList.remove('step-done');
-  }
-
-  location.reload(); // simplest clean reset
+  location.reload();
 }
 </script>
 </body>
