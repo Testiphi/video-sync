@@ -295,7 +295,7 @@
     <div class="panel">
       <h2>视频 A <span class="label-a">· 选区</span></h2>
       <div class="frame-preview" id="roi-preview-a">
-        <img id="roi-img-a" src="" alt="点击框选计时器区域">
+        <img id="roi-img-a" src="" draggable="false" ondragstart="return false" alt="点击框选计时器区域">
         <div class="roi-overlay" id="roi-overlay-a"></div>
       </div>
       <div class="row">
@@ -310,7 +310,7 @@
     <div class="panel">
       <h2>视频 B <span class="label-b">· 选区</span></h2>
       <div class="frame-preview" id="roi-preview-b">
-        <img id="roi-img-b" src="" alt="点击框选计时器区域">
+        <img id="roi-img-b" src="" draggable="false" ondragstart="return false" alt="点击框选计时器区域">
         <div class="roi-overlay" id="roi-overlay-b"></div>
       </div>
       <div class="row">
@@ -635,6 +635,7 @@ function setupROIDrag(label) {
   }
 
   img.addEventListener('mousedown', (e) => {
+    e.preventDefault();
     roiDrag.active = true;
     roiDrag.label = label;
     const pos = getCursorPos(e);
