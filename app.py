@@ -359,7 +359,7 @@ def sync():
 
     if not idx_a or not idx_b:
         return jsonify({"status": "error", "message": "Both videos required. Pass ?a=<id>&b=<id>"}), 400
-    if not idx_a._mapping_fn or not idx_b._mapping_fn:
+    if idx_a._slope is None or idx_b._slope is None:
         return jsonify({"status": "error", "message": "Both videos must be indexed"}), 400
 
     timer = request.args.get("timer", type=float)
@@ -400,9 +400,21 @@ def sync_range():
         return jsonify({"status": "error", "message": "Pass ?a=<id>&b=<id>"}), 400
     if not idx_a.calibration_points or not idx_b.calibration_points:
         return jsonify({"status": "error", "message": "Not indexed"}), 400
+    if idx_a._slope is None or idx_b._slope is None:
+        return jsonify({"status": "error", "message": "Build index first"}), 400
 
-    t_min = max(idx_a.calibration_points[0][1], idx_b.calibration_points[0][1])
-    t_max = min(idx_a.calibration_points[-1][1], idx_b.calibration_points[-1][1])
+    ta0 = idx_a.frame_to_timer(0) or 0
+    ta1 = idx_a.frame_to_timer(idx_a.frame_count - 1) or 0
+    tb0 = idx_b.frame_to_timer(0) or 0
+    tb1 = idx_b.frame_to_timer(idx_b.frame_count - 1) or 0
+
+    t_a_min, t_a_max = min(ta0, ta1), max(ta0, ta1)
+    t_b_min, t_b_max = min(tb0, tb1), max(tb0, tb1)
+
+    t_min = max(t_a_min, t_b_min)
+    t_max = min(t_a_max, t_b_max)
+    if t_min >= t_max:
+        t_min, t_max = t_a_min, t_a_max
 
     return jsonify({
         "status": "ok",
@@ -411,6 +423,8 @@ def sync_range():
         "timer_count": max(100, int((t_max - t_min) * 100)),
         "fps_a": idx_a.fps,
         "fps_b": idx_b.fps,
+        "range_a": [round(t_a_min, 3), round(t_a_max, 3)],
+        "range_b": [round(t_b_min, 3), round(t_b_max, 3)],
     })
 
 

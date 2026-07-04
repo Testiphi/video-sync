@@ -3,7 +3,6 @@ Video Indexer — Frame↔Timer mapping via calibration points + linear interpol
 """
 import cv2
 import numpy as np
-from scipy.interpolate import interp1d
 import re
 import os
 import json
@@ -79,8 +78,9 @@ class VideoIndexer:
         # Timer ROI as percentages: (x_pct, y_pct, w_pct, h_pct)
         self.roi = None
 
-        # Interpolation function
-        self._mapping_fn = None
+        # Linear regression: frame = slope * timer + intercept
+        self._slope = None
+        self._intercept = None
 
         # Cache directory for extracted frames
         self.cache_dir = os.path.join(cache_dir, self.video_name)
@@ -163,22 +163,25 @@ class VideoIndexer:
 
     def add_calibration_point(self, frame_number, timer_seconds):
         """Add a manual (frame, timer) calibration point."""
-        # Remove existing point at same frame if any
         self.calibration_points = [
             p for p in self.calibration_points if p[0] != frame_number
         ]
         self.calibration_points.append((frame_number, timer_seconds))
         self.calibration_points.sort(key=lambda p: p[0])
-        self._mapping_fn = None  # invalidate
+        self._slope = None  # invalidate
 
     def remove_calibration_point(self, frame_number):
         self.calibration_points = [
             p for p in self.calibration_points if p[0] != frame_number
         ]
-        self._mapping_fn = None
+        self._slope = None
 
     def build_index(self):
-        """Build linear interpolation from calibration points.
+        """Build linear regression from calibration points.
+        Uses least-squares fit (frame = slope * timer + intercept)
+        instead of piecewise interpolation —  the timer-frame
+        relationship is fundamentally linear, so regression gives
+        better extrapolation and smooths out individual bad points.
         Returns dict with status info.
         """
         if len(self.calibration_points) < 2:
@@ -188,20 +191,14 @@ class VideoIndexer:
                 "points": len(self.calibration_points),
             }
 
-        frames = np.array([p[0] for p in self.calibration_points])
-        timers = np.array([p[1] for p in self.calibration_points])
+        frames = np.array([p[0] for p in self.calibration_points], dtype=float)
+        timers = np.array([p[1] for p in self.calibration_points], dtype=float)
 
-        # Linear interpolation: timer → frame
-        self._mapping_fn = interp1d(
-            timers, frames, kind='linear',
-            bounds_error=False, fill_value='extrapolate'
-        )
+        # Linear regression: frame = slope * timer + intercept
+        coeffs = np.polyfit(timers, frames, 1)
 
-        # Also build inverse: frame → timer (for display)
-        self._inv_fn = interp1d(
-            frames, timers, kind='linear',
-            bounds_error=False, fill_value='extrapolate'
-        )
+        self._slope = coeffs[0]
+        self._intercept = coeffs[1]
 
         return {
             "status": "ok",
@@ -210,20 +207,26 @@ class VideoIndexer:
             "timer_max": float(np.max(timers)),
             "frame_min": int(np.min(frames)),
             "frame_max": int(np.max(frames)),
+            "regression": {
+                "slope": round(float(self._slope), 6),
+                "intercept": round(float(self._intercept), 4),
+                "r2": round(float(np.corrcoef(timers, frames)[0, 1] ** 2), 6),
+            },
         }
 
     def timer_to_frame(self, timer_seconds):
         """Given timer value, return the matching frame number (int)."""
-        if self._mapping_fn is None:
+        if self._slope is None:
             return None
-        frame = float(self._mapping_fn(timer_seconds))
+        frame = self._slope * timer_seconds + self._intercept
         return int(round(frame))
 
     def frame_to_timer(self, frame_number):
         """Given frame number, return estimated timer value."""
-        if self._inv_fn is None:
+        if self._slope is None or self._slope == 0:
             return None
-        return float(self._inv_fn(frame_number))
+        timer = (frame_number - self._intercept) / self._slope
+        return timer
 
     # ---- Sampling ----
 
@@ -284,7 +287,7 @@ class VideoIndexer:
             "duration": self.duration,
             "roi": self.roi,
             "calibration_points": [(int(f), float(t)) for f, t in self.calibration_points],
-            "indexed": self._mapping_fn is not None,
+            "indexed": self._slope is not None,
         }
 
     def to_json(self):
