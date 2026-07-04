@@ -60,6 +60,35 @@ def index():
 
 # ---- Video Loading ----
 
+import tempfile
+
+
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
+
+@app.route("/api/upload", methods=["POST"])
+def upload_video():
+    """Upload a video file and return its saved path."""
+    label = request.form.get("label", "a")
+    if "file" not in request.files:
+        return jsonify({"status": "error", "message": "No file provided"}), 400
+
+    file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"status": "error", "message": "Empty filename"}), 400
+
+    # Save to uploads dir
+    safe_name = f"{uuid.uuid4().hex[:8]}_{file.filename}"
+    save_path = os.path.join(UPLOAD_DIR, safe_name)
+    file.save(save_path)
+
+    return jsonify({
+        "status": "ok",
+        "path": save_path,
+        "idx_id": None,  # Will be set by load-video
+    })
+
 @app.route("/api/load-video", methods=["POST"])
 def load_video():
     data = request.get_json()

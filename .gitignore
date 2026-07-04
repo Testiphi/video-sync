@@ -13,6 +13,7 @@ env/
 # Frame cache
 cache/
 frames/
+uploads/
 
 # IDE
 .vscode/

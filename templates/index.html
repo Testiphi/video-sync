@@ -486,14 +486,37 @@ function browseFile(label) {
   document.getElementById('file-input-' + label).click();
 }
 
-function handleFileSelect(label, input) {
+async function handleFileSelect(label, input) {
   const file = input.files[0];
   if (!file) return;
-  // Chromium exposes file.path (full path); fallback to name
-  const path = file.path || file.name;
-  document.getElementById('path-' + label).value = path;
-  loadVideo(label);
-  input.value = '';  // reset so same file can be re-selected
+
+  // Try Chromium's full path first
+  if (file.path && file.path.length > 3) {
+    document.getElementById('path-' + label).value = file.path;
+    loadVideo(label);
+    input.value = '';
+    return;
+  }
+
+  // Browser doesn't expose full path → upload to server
+  document.getElementById(`meta-${label}`).innerHTML = '上传中...';
+  const form = new FormData();
+  form.append('file', file);
+  form.append('label', label);
+
+  try {
+    const r = await fetch('/api/upload', { method: 'POST', body: form });
+    const data = await r.json();
+    if (data.status !== 'ok') {
+      document.getElementById(`meta-${label}`).textContent = '上传失败: ' + data.message;
+      return;
+    }
+    document.getElementById('path-' + label).value = data.path;
+    loadVideo(label);
+  } catch(e) {
+    document.getElementById(`meta-${label}`).textContent = '上传失败: ' + e.message;
+  }
+  input.value = '';
 }
 
 function setupDragDrop(label) {
@@ -512,7 +535,7 @@ function setupDragDrop(label) {
     panel.classList.remove('dragover');
   });
 
-  panel.addEventListener('drop', (e) => {
+  panel.addEventListener('drop', async (e) => {
     e.preventDefault();
     e.stopPropagation();
     panel.classList.remove('dragover');
@@ -520,16 +543,37 @@ function setupDragDrop(label) {
     const file = e.dataTransfer.files[0];
     if (!file) return;
 
-    let path = file.path || file.name;
     // Check extension
-    const ext = path.split('.').pop().toLowerCase();
+    const ext = file.name.split('.').pop().toLowerCase();
     if (!['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(ext)) {
       alert('不支持的视频格式: .' + ext + '（支持 mp4/mov/avi/mkv/webm）');
       return;
     }
 
-    document.getElementById('path-' + label).value = path;
-    loadVideo(label);
+    // Try Chromium's full path from drag-and-drop
+    if (file.path && file.path.length > 3) {
+      document.getElementById('path-' + label).value = file.path;
+      loadVideo(label);
+      return;
+    }
+
+    // Fall back to upload
+    document.getElementById(`meta-${label}`).innerHTML = '上传中...';
+    const form = new FormData();
+    form.append('file', file);
+    form.append('label', label);
+    try {
+      const r = await fetch('/api/upload', { method: 'POST', body: form });
+      const data = await r.json();
+      if (data.status !== 'ok') {
+        document.getElementById(`meta-${label}`).textContent = '上传失败: ' + data.message;
+        return;
+      }
+      document.getElementById('path-' + label).value = data.path;
+      loadVideo(label);
+    } catch(e) {
+      document.getElementById(`meta-${label}`).textContent = '上传失败: ' + e.message;
+    }
   });
 }
 
