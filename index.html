@@ -1,0 +1,1045 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FrameSync — 双视频同步播放器</title>
+<style>
+:root {
+  --bg: #0f1117;
+  --surface: #181b26;
+  --card: #1e2230;
+  --border: #2a2e3e;
+  --border-hover: #3d4360;
+  --text: #e4e7ee;
+  --text-dim: #8187a0;
+  --accent: #4f8cff;
+  --accent-hover: #6ba0ff;
+  --green: #34d399;
+  --green-bg: rgba(52,211,153,0.12);
+  --yellow: #fbbf24;
+  --red: #f87171;
+  --red-bg: rgba(248,113,113,0.12);
+  --radius: 10px;
+  --radius-sm: 6px;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { font-size: 14px; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ─── Layout ─── */
+.app { max-width: 1600px; margin: 0 auto; padding: 12px 16px 40px; }
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 1000px) { .two-col { grid-template-columns: 1fr; } }
+
+/* ─── Header ─── */
+header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 6px 0 12px; border-bottom: 1px solid var(--border); margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+header h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.3px; }
+header h1 span { color: var(--accent); }
+header .ver { font-size: 10px; color: var(--text-dim); background: var(--card); padding: 1px 7px; border-radius: 8px; }
+header .saved-badge { font-size: 11px; color: var(--green); display: none; margin-left: auto; }
+header .saved-badge.show { display: inline; }
+
+/* ─── Card ─── */
+.card {
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px 16px; margin-bottom: 14px;
+}
+.card h3 {
+  font-size: 13px; font-weight: 600; margin-bottom: 10px;
+  display: flex; align-items: center; gap: 6px;
+}
+.card h3 .dot-a { color: var(--accent); }
+.card h3 .dot-b { color: var(--green); }
+
+/* ─── File Input ─── */
+.file-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.file-row input[type="file"] { display: none; }
+.fake-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text); padding: 7px 14px; font-size: 13px; cursor: pointer;
+  transition: border-color .2s, background .2s; white-space: nowrap;
+}
+.fake-btn:hover { border-color: var(--border-hover); background: #222736; }
+.fake-btn.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+.fake-btn.primary:hover { background: var(--accent-hover); }
+.fake-btn.green { background: var(--green); border-color: var(--green); color: #000; }
+.fake-btn.green:hover { opacity: .85; }
+.fake-btn.red { background: var(--red); border-color: var(--red); color: #fff; }
+.fake-btn.red:hover { opacity: .85; }
+.fake-btn:disabled { opacity: .4; cursor: not-allowed; }
+.filename { font-size: 12px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
+.filename.loaded { color: var(--green); }
+
+/* ─── Video ─── */
+.video-wrap {
+  position: relative; background: #000; border-radius: var(--radius-sm);
+  overflow: hidden; width: 100%;
+}
+.video-wrap video { width: 100%; display: block; max-height: 320px; background: #000; cursor: pointer; }
+.video-controls {
+  display: flex; gap: 6px; align-items: center; margin-top: 6px; flex-wrap: wrap;
+}
+.video-controls .seek-input {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text); padding: 4px 8px; font-size: 12px; width: 80px;
+  font-variant-numeric: tabular-nums;
+}
+.video-controls .seek-input:focus { border-color: var(--accent); outline: none; }
+.video-controls .time-display { font-size: 12px; color: var(--text-dim); font-variant-numeric: tabular-nums; min-width: 90px; }
+.video-controls .play-btn {
+  background: none; border: 1px solid var(--border); color: var(--text);
+  cursor: pointer; padding: 3px 10px; border-radius: var(--radius-sm); font-size: 14px;
+  transition: border-color .2s;
+}
+.video-controls .play-btn:hover { border-color: var(--accent); }
+
+/* ─── ROI Selection ─── */
+.roi-section { margin-top: 8px; }
+.roi-section .canvas-wrap {
+  position: relative; border-radius: var(--radius-sm); overflow: hidden;
+  background: #000; display: none; width: 100%;
+}
+.roi-section .canvas-wrap canvas { width: 100%; display: block; cursor: crosshair; }
+.roi-section .roi-info { font-size: 11px; color: var(--text-dim); padding: 4px 0; }
+.roi-section .roi-info.ok { color: var(--green); }
+.roi-hint { font-size: 11px; color: var(--text-dim); }
+
+/* ─── Calibration ─── */
+.cal-section { margin-top: 10px; }
+.cal-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+.cal-row label { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
+.cal-row input[type="number"] {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--text); padding: 5px 8px; font-size: 12px; width: 110px;
+  font-variant-numeric: tabular-nums;
+}
+.cal-row input[type="number"]:focus { border-color: var(--accent); outline: none; }
+
+/* ROI Zoom */
+.roi-zoom-wrap {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 4px; display: inline-block; margin: 4px 0;
+}
+.roi-zoom-wrap canvas { display: block; image-rendering: pixelated; }
+
+/* Cal Table */
+.cal-table { width: 100%; border-collapse: collapse; font-size: 12px; margin: 6px 0; }
+.cal-table th {
+  text-align: left; padding: 5px 8px; color: var(--text-dim); font-weight: 500;
+  border-bottom: 1px solid var(--border);
+}
+.cal-table td { padding: 5px 8px; border-bottom: 1px solid #1e2535; }
+.cal-table .del-btn { color: var(--red); cursor: pointer; font-size: 16px; line-height: 1; transition: opacity .2s; }
+.cal-table .del-btn:hover { opacity: .7; }
+.cal-table .ok { color: var(--green); }
+
+/* Regression info */
+.reg-box {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 10px 12px; margin-top: 6px; display: none;
+}
+.reg-box.show { display: block; }
+.reg-box .formula { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; margin-bottom: 2px; }
+.reg-box .formula .val { color: var(--yellow); }
+.reg-box .r2 { font-size: 12px; color: var(--text-dim); }
+.reg-box .r2 .r2-val { color: var(--green); }
+
+/* ─── Sync Section ─── */
+#sync-section { display: none; margin-top: 16px; }
+#sync-section.show { display: block; }
+.sync-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+@media (max-width: 1000px) { .sync-grid { grid-template-columns: 1fr; } }
+.sync-frame {
+  background: #000; border-radius: var(--radius-sm); overflow: hidden; position: relative;
+}
+.sync-frame video { width: 100%; display: block; max-height: 360px; background: #000; }
+.sync-frame .sync-info {
+  position: absolute; bottom: 0; left: 0; right: 0;
+  background: linear-gradient(transparent, rgba(0,0,0,0.85));
+  padding: 16px 10px 6px; font-size: 12px;
+  display: flex; justify-content: space-between; pointer-events: none;
+}
+.sync-frame .sync-info .sn { color: var(--text-dim); }
+.sync-frame .sync-info .svt { color: var(--yellow); font-variant-numeric: tabular-nums; }
+.sync-frame .sync-info .stt { color: var(--green); font-variant-numeric: tabular-nums; }
+
+.sync-bar { padding: 10px 0 6px; }
+.sync-bar .timer-display {
+  text-align: center; font-size: 22px; font-weight: 700; color: var(--yellow);
+  font-variant-numeric: tabular-nums; padding: 4px 0;
+}
+.sync-bar .timer-range { display: flex; justify-content: space-between; font-size: 11px; color: var(--text-dim); }
+
+input[type="range"] {
+  -webkit-appearance: none; appearance: none;
+  width: 100%; height: 6px;
+  background: var(--border); border-radius: 3px; outline: none;
+  cursor: pointer; margin: 4px 0;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none; appearance: none;
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--accent); cursor: pointer; border: 2px solid #fff;
+  box-shadow: 0 0 8px rgba(79,140,255,0.4);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--accent); cursor: pointer; border: 2px solid #fff;
+}
+
+.fine-tune {
+  display: flex; gap: 6px; justify-content: center; align-items: center;
+  flex-wrap: wrap; padding: 4px 0;
+}
+.fine-tune .ft-label { font-size: 11px; color: var(--text-dim); }
+
+/* ─── Steps ─── */
+.steps { display: flex; gap: 6px; flex-wrap: wrap; }
+.step {
+  font-size: 11px; padding: 3px 10px; border-radius: 10px;
+  background: var(--surface); border: 1px solid var(--border); color: var(--text-dim);
+  transition: all .3s;
+}
+.step.done { background: var(--green-bg); border-color: var(--green); color: var(--green); }
+
+/* ─── Notifications ─── */
+.notify {
+  position: fixed; top: 16px; right: 16px; z-index: 9999;
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 12px 18px; font-size: 13px; color: var(--text);
+  box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+  transform: translateX(120%); transition: transform .3s ease;
+  max-width: 340px;
+}
+.notify.show { transform: translateX(0); }
+.notify.success { border-left: 3px solid var(--green); }
+.notify.error { border-left: 3px solid var(--red); }
+.notify.info { border-left: 3px solid var(--accent); }
+</style>
+</head>
+<body>
+
+<!-- ─── Notification ─── -->
+<div id="notify" class="notify"></div>
+
+<div class="app">
+  <header>
+    <h1>🎬 <span>FrameSync</span></h1>
+    <span class="ver">纯静态</span>
+    <span class="saved-badge" id="saved-badge">💾 已保存</span>
+    <div class="steps" style="margin-left:auto;">
+      <span class="step" id="st1">① 加载视频</span>
+      <span class="step" id="st2">② 框选计时器</span>
+      <span class="step" id="st3">③ 校准</span>
+      <span class="step" id="st4">④ 同步</span>
+    </div>
+  </header>
+
+  <!-- ─── Two Columns ─── -->
+  <div class="two-col">
+
+    <!-- ═══ Panel A ═══ -->
+    <div class="card" id="panel-a">
+      <h3><span class="dot-a">●</span> 视频 A</h3>
+
+      <!-- File -->
+      <div class="file-row" style="margin-bottom:8px;">
+        <label class="fake-btn" for="file-a">📂 选择视频</label>
+        <input type="file" id="file-a" accept="video/mp4,video/mov,video/avi,video/mkv,video/webm,video/*">
+        <span class="filename" id="fname-a">未选择</span>
+      </div>
+
+      <!-- Video Player -->
+      <div class="video-wrap">
+        <video id="vid-a" preload="auto" playsinline muted></video>
+      </div>
+      <div class="video-controls">
+        <button class="play-btn" id="play-a" onclick="togglePlay('a')">▶</button>
+        <input class="seek-input" type="number" id="seek-a" step="0.001" min="0" value="0"
+               onchange="seekTo('a', parseFloat(this.value))" placeholder="秒">
+        <span class="time-display" id="time-a">00:00.000 / 00:00.000</span>
+      </div>
+
+      <!-- ROI -->
+      <div class="roi-section">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <button class="fake-btn" onclick="captureROIFrame('a')">✏️ 框选计时器区域</button>
+          <button class="fake-btn" style="font-size:11px;padding:5px 10px;" onclick="setDefaultROI('a')">推荐位置</button>
+          <button class="fake-btn red" style="font-size:11px;padding:5px 10px;" onclick="clearROI('a')">清除</button>
+          <span class="roi-info" id="roi-info-a">未设置</span>
+        </div>
+        <div class="canvas-wrap" id="roi-canvas-wrap-a">
+          <canvas id="roi-canvas-a"></canvas>
+        </div>
+      </div>
+
+      <!-- Calibration -->
+      <div class="cal-section" id="cal-section-a">
+        <h3 style="font-size:12px;">⏱️ 校准点</h3>
+        <div class="cal-row">
+          <label>跳转到画面：</label>
+          <input type="number" id="cal-seek-a" step="0.001" min="0" value="0" placeholder="秒">
+          <button class="fake-btn" style="font-size:11px;padding:5px 10px;" onclick="seekCalFrame('a')">跳转</button>
+          <span style="font-size:10px;color:var(--text-dim);">→ 暂停，查看下方计时器放大图</span>
+        </div>
+        <div class="cal-row" style="gap:6px;">
+          <label>计时器数值（秒）：</label>
+          <input type="number" id="cal-val-a" step="0.001" min="0" placeholder="如 83.456" style="width:120px;">
+          <button class="fake-btn primary" onclick="addCalPoint('a')">➕ 添加</button>
+        </div>
+        <div class="roi-zoom-wrap">
+          <canvas id="cal-zoom-a" width="320" height="80"></canvas>
+        </div>
+        <div style="font-size:10px;color:var(--text-dim);margin:2px 0 6px;">↑ 计时器区域放大效果（ROI 裁剪）</div>
+        <table class="cal-table" id="cal-table-a">
+          <thead><tr><th>#</th><th>视频时间</th><th>计时器值</th><th></th></tr></thead>
+          <tbody id="cal-tbody-a"></tbody>
+        </table>
+        <div class="reg-box" id="reg-box-a">
+          <div class="formula">视频时间 = <span class="val" id="reg-a-a">—</span> × 计时器 + <span class="val" id="reg-b-a">—</span></div>
+          <div class="r2">拟合优度 R² = <span class="r2-val" id="reg-r2-a">—</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ Panel B ═══ -->
+    <div class="card" id="panel-b">
+      <h3><span class="dot-b">●</span> 视频 B</h3>
+
+      <div class="file-row" style="margin-bottom:8px;">
+        <label class="fake-btn" for="file-b">📂 选择视频</label>
+        <input type="file" id="file-b" accept="video/mp4,video/mov,video/avi,video/mkv,video/webm,video/*">
+        <span class="filename" id="fname-b">未选择</span>
+      </div>
+
+      <div class="video-wrap">
+        <video id="vid-b" preload="auto" playsinline muted></video>
+      </div>
+      <div class="video-controls">
+        <button class="play-btn" id="play-b" onclick="togglePlay('b')">▶</button>
+        <input class="seek-input" type="number" id="seek-b" step="0.001" min="0" value="0"
+               onchange="seekTo('b', parseFloat(this.value))" placeholder="秒">
+        <span class="time-display" id="time-b">00:00.000 / 00:00.000</span>
+      </div>
+
+      <div class="roi-section">
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+          <button class="fake-btn" onclick="captureROIFrame('b')">✏️ 框选计时器区域</button>
+          <button class="fake-btn" style="font-size:11px;padding:5px 10px;" onclick="setDefaultROI('b')">推荐位置</button>
+          <button class="fake-btn red" style="font-size:11px;padding:5px 10px;" onclick="clearROI('b')">清除</button>
+          <span class="roi-info" id="roi-info-b">未设置</span>
+        </div>
+        <div class="canvas-wrap" id="roi-canvas-wrap-b">
+          <canvas id="roi-canvas-b"></canvas>
+        </div>
+      </div>
+
+      <div class="cal-section" id="cal-section-b">
+        <h3 style="font-size:12px;">⏱️ 校准点</h3>
+        <div class="cal-row">
+          <label>跳转到画面：</label>
+          <input type="number" id="cal-seek-b" step="0.001" min="0" value="0" placeholder="秒">
+          <button class="fake-btn" style="font-size:11px;padding:5px 10px;" onclick="seekCalFrame('b')">跳转</button>
+          <span style="font-size:10px;color:var(--text-dim);">→ 暂停，查看下方计时器放大图</span>
+        </div>
+        <div class="cal-row" style="gap:6px;">
+          <label>计时器数值（秒）：</label>
+          <input type="number" id="cal-val-b" step="0.001" min="0" placeholder="如 83.456" style="width:120px;">
+          <button class="fake-btn primary" onclick="addCalPoint('b')">➕ 添加</button>
+        </div>
+        <div class="roi-zoom-wrap">
+          <canvas id="cal-zoom-b" width="320" height="80"></canvas>
+        </div>
+        <div style="font-size:10px;color:var(--text-dim);margin:2px 0 6px;">↑ 计时器区域放大效果（ROI 裁剪）</div>
+        <table class="cal-table" id="cal-table-b">
+          <thead><tr><th>#</th><th>视频时间</th><th>计时器值</th><th></th></tr></thead>
+          <tbody id="cal-tbody-b"></tbody>
+        </table>
+        <div class="reg-box" id="reg-box-b">
+          <div class="formula">视频时间 = <span class="val" id="reg-a-b">—</span> × 计时器 + <span class="val" id="reg-b-b">—</span></div>
+          <div class="r2">拟合优度 R² = <span class="r2-val" id="reg-r2-b">—</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ Sync Section ═══ -->
+  <div id="sync-section">
+    <div class="card">
+      <h3>🔄 同步播放</h3>
+      <div class="sync-grid">
+        <div class="sync-frame">
+          <video id="sync-vid-a" preload="auto" playsinline muted></video>
+          <div class="sync-info">
+            <span class="sn"><span class="dot-a">●</span> A</span>
+            <span>视频时间 <span class="svt" id="svt-a">00:00.000</span></span>
+            <span>计时器 <span class="stt" id="stt-a">00:00.000</span></span>
+          </div>
+        </div>
+        <div class="sync-frame">
+          <video id="sync-vid-b" preload="auto" playsinline muted></video>
+          <div class="sync-info">
+            <span class="sn"><span class="dot-b">●</span> B</span>
+            <span>视频时间 <span class="svt" id="svt-b">00:00.000</span></span>
+            <span>计时器 <span class="stt" id="stt-b">00:00.000</span></span>
+          </div>
+        </div>
+      </div>
+      <div class="sync-bar">
+        <div class="timer-display" id="sync-timer-display">00:00.000</div>
+        <input type="range" id="sync-slider" min="0" max="1000" value="0" step="1"
+               oninput="onSyncSlider(this.value)">
+        <div class="timer-range">
+          <span id="sync-min">00:00.000</span>
+          <span>← 目标计时器值 →</span>
+          <span id="sync-max">00:00.000</span>
+        </div>
+      </div>
+      <div class="fine-tune">
+        <button class="fake-btn" style="font-size:11px;padding:4px 10px;" onclick="syncFineTune('a', -1)">A-1s</button>
+        <button class="fake-btn" style="font-size:11px;padding:4px 10px;" onclick="syncFineTune('a', -0.1)">A-0.1s</button>
+        <span class="ft-label">微调</span>
+        <button class="fake-btn" style="font-size:11px;padding:4px 10px;" onclick="syncFineTune('a', 0.1)">A+0.1s</button>
+        <button class="fake-btn" style="font-size:11px;padding:4px 10px;" onclick="syncFineTune('a', 1)">A+1s</button>
+        <span style="color:var(--text-dim);margin:0 4px;">|</span>
+        <button class="fake-btn" style="font-size:11px;padding:4px 10px;" onclick="syncFineTune('b', -1)">B-1s</button>
+        <button class="fake-btn" style="font-size:11px;padding:4px 10px;" onclick="syncFineTune('b', -0.1)">B-0.1s</button>
+        <span class="ft-label">微调</span>
+        <button class="fake-btn" style="font-size:11px;padding:4px 10px;" onclick="syncFineTune('b', 0.1)">B+0.1s</button>
+        <button class="fake-btn" style="font-size:11px;padding:4px 10px;" onclick="syncFineTune('b', 1)">B+1s</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─── Bottom Actions ─── -->
+  <div style="margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;justify-content:center;">
+    <button class="fake-btn" onclick="saveState()">💾 保存数据</button>
+    <button class="fake-btn" onclick="loadState()">📂 恢复数据</button>
+    <button class="fake-btn red" onclick="clearAll()">🗑️ 清除全部</button>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════
+// FrameSync — 纯前端双视频同步播放器
+// ═══════════════════════════════════════════════════════════════
+
+// ─── State ───
+const V = {
+  a: { video: null, url: null, fileName: '', duration: 0,
+       roi: null, pts: [], reg: null, frameData: null,
+       syncOffset: 0 },
+  b: { video: null, url: null, fileName: '', duration: 0,
+       roi: null, pts: [], reg: null, frameData: null,
+       syncOffset: 0 }
+};
+const DEFAULTS = ['a', 'b'];
+let syncTimerTarget = 0;
+let syncTimerMin = 0;
+let syncTimerMax = 60;
+let syncSliderSteps = 1000;
+
+// ─── Helpers ───
+function fmt(sec) {
+  if (sec == null || isNaN(sec)) return '--:--.---';
+  const neg = sec < 0; if (neg) sec = -sec;
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  const ms = Math.floor((sec - Math.floor(sec)) * 1000);
+  return (neg ? '-' : '') +
+    String(m).padStart(2,'0') + ':' +
+    String(s).padStart(2,'0') + '.' +
+    String(ms).padStart(3,'0');
+}
+
+function parseFmt(str) { // "01:23.456" → 83.456
+  if (typeof str === 'number') return str;
+  const m = str.match(/^(?:(\d+):)?(\d+)(?:[.](\d+))?$/);
+  if (!m) return NaN;
+  const min = parseInt(m[1]||0);
+  const sec = parseInt(m[2]);
+  const ms = parseInt((m[3]||'').padEnd(3,'0').slice(0,3));
+  return min*60 + sec + ms/1000;
+}
+
+function notify(msg, type='info') {
+  const el = document.getElementById('notify');
+  el.textContent = msg;
+  el.className = 'notify ' + type;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), 3000);
+}
+
+function getDefaultROI() { return { x: 82, y: 8, w: 16, h: 14 }; }
+
+// ─── Video Loading ───
+function handleFile(label) {
+  const inp = document.getElementById('file-' + label);
+  const file = inp.files[0];
+  if (!file) return;
+  const s = V[label];
+  // Revoke old URL
+  if (s.url) URL.revokeObjectURL(s.url);
+  s.url = URL.createObjectURL(file);
+  s.fileName = file.name;
+  s.roi = null; s.pts = []; s.reg = null; s.frameData = null; s.syncOffset = 0;
+
+  const vid = document.getElementById('vid-' + label);
+  vid.src = s.url;
+  vid.load();
+
+  document.getElementById('fname-' + label).textContent = file.name;
+  document.getElementById('fname-' + label).classList.add('loaded');
+
+  vid.addEventListener('loadedmetadata', () => {
+    s.duration = vid.duration;
+    document.getElementById('seek-' + label).max = vid.duration;
+    updateTimeDisplay(label);
+    stepDone('st1');
+    checkSyncReady();
+  });
+
+  vid.addEventListener('timeupdate', () => updateTimeDisplay(label));
+  vid.addEventListener('seeked', () => { updateTimeDisplay(label); updateCalZoom(label); });
+  vid.addEventListener('play', () => document.getElementById('play-' + label).textContent = '⏸');
+  vid.addEventListener('pause', () => document.getElementById('play-' + label).textContent = '▶');
+
+  // Hide ROI canvas
+  document.getElementById('roi-canvas-wrap-' + label).style.display = 'none';
+  document.getElementById('roi-info-' + label).textContent = '未设置';
+  document.getElementById('roi-info-' + label).className = 'roi-info';
+
+  // Reset cal table
+  document.getElementById('cal-tbody-' + label).innerHTML = '';
+  document.getElementById('reg-box-' + label).classList.remove('show');
+  document.getElementById('cal-section-' + label).style.display = 'block';
+
+  // Clear sync state
+  document.getElementById('sync-section').classList.remove('show');
+
+  notify('视频 ' + label.toUpperCase() + ' 加载成功', 'success');
+
+  // Auto-pause on load
+  vid.pause();
+}
+
+document.getElementById('file-a').addEventListener('change', () => handleFile('a'));
+document.getElementById('file-b').addEventListener('change', () => handleFile('b'));
+
+// ─── Playback ───
+function togglePlay(label) {
+  const vid = document.getElementById('vid-' + label);
+  if (vid.paused) vid.play(); else vid.pause();
+}
+
+function seekTo(label, t) {
+  const vid = document.getElementById('vid-' + label);
+  if (!vid.src) return;
+  t = Math.max(0, Math.min(t, vid.duration || 0));
+  vid.currentTime = t;
+}
+
+function updateTimeDisplay(label) {
+  const vid = document.getElementById('vid-' + label);
+  if (!vid.src || !vid.duration) return;
+  document.getElementById('time-' + label).textContent =
+    fmt(vid.currentTime) + ' / ' + fmt(vid.duration);
+  document.getElementById('seek-' + label).value = vid.currentTime.toFixed(3);
+}
+
+// ─── ROI Selection ───
+function captureROIFrame(label) {
+  const vid = document.getElementById('vid-' + label);
+  if (!vid.src || !vid.duration) { notify('请先加载视频', 'error'); return; }
+  vid.pause();
+
+  const wrap = document.getElementById('roi-canvas-wrap-' + label);
+  const canvas = document.getElementById('roi-canvas-' + label);
+  const ctx = canvas.getContext('2d');
+
+  // Size canvas to video
+  canvas.width = vid.videoWidth || 640;
+  canvas.height = vid.videoHeight || 360;
+  ctx.drawImage(vid, 0, 0, canvas.width, canvas.height);
+
+  // Store frame data for ROI zoom
+  const tmpC = document.createElement('canvas');
+  tmpC.width = canvas.width; tmpC.height = canvas.height;
+  tmpC.getContext('2d').drawImage(vid, 0, 0);
+  V[label].frameData = tmpC;
+
+  wrap.style.display = 'block';
+
+  // Setup drag
+  let dragging = false, sx = 0, sy = 0, ex = 0, ey = 0;
+  const rect = () => canvas.getBoundingClientRect();
+  const rel = (cx, cy) => ({
+    x: (cx - rect().left) / rect().width * canvas.width,
+    y: (cy - rect().top) / rect().height * canvas.height
+  });
+
+  function drawRect() {
+    ctx.drawImage(vid, 0, 0, canvas.width, canvas.height); // redraw
+    const lx = Math.min(sx, ex), ly = Math.min(sy, ey);
+    const lw = Math.abs(ex - sx), lh = Math.abs(ey - sy);
+    ctx.fillStyle = 'rgba(79,140,255,0.15)';
+    ctx.fillRect(lx, ly, lw, lh);
+    ctx.strokeStyle = '#4f8cff';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(lx, ly, lw, lh);
+  }
+
+  const onDown = (e) => {
+    e.preventDefault();
+    const p = rel(e.clientX, e.clientY);
+    sx = p.x; sy = p.y; ex = p.x; ey = p.y;
+    dragging = true;
+  };
+  const onMove = (e) => {
+    if (!dragging) return;
+    const p = rel(e.clientX, e.clientY);
+    ex = p.x; ey = p.y;
+    drawRect();
+  };
+  const onUp = () => {
+    if (!dragging) return;
+    dragging = false;
+    const lx = Math.min(sx, ex), ly = Math.min(sy, ey);
+    const lw = Math.abs(ex - sx), lh = Math.abs(ey - sy);
+    if (lw < 10 || lh < 10) {
+      notify('选区太小，请重新框选', 'error');
+      return;
+    }
+    // Store as percentage
+    V[label].roi = {
+      x: lx / canvas.width * 100,
+      y: ly / canvas.height * 100,
+      w: lw / canvas.width * 100,
+      h: lh / canvas.height * 100
+    };
+    document.getElementById('roi-info-' + label).textContent =
+      `已选: x=${V[label].roi.x.toFixed(1)}% y=${V[label].roi.y.toFixed(1)}% w=${V[label].roi.w.toFixed(1)}% h=${V[label].roi.h.toFixed(1)}%`;
+    document.getElementById('roi-info-' + label).className = 'roi-info ok';
+    wrap.style.display = 'none';
+    stepDone('st2');
+    updateCalZoom(label);
+    notify('计时器区域已标记 (' + label.toUpperCase() + ')', 'success');
+    checkSyncReady();
+  };
+
+  canvas.onmousedown = onDown;
+  canvas.onmousemove = onMove;
+  canvas.onmouseup = onUp;
+  canvas.onmouseleave = onUp;
+}
+
+function setDefaultROI(label) {
+  const roi = getDefaultROI();
+  V[label].roi = { x: roi.x, y: roi.y, w: roi.w, h: roi.h };
+  document.getElementById('roi-info-' + label).textContent =
+    `已选: x=${roi.x}% y=${roi.y}% w=${roi.w}% h=${roi.h}%`;
+  document.getElementById('roi-info-' + label).className = 'roi-info ok';
+  document.getElementById('roi-canvas-wrap-' + label).style.display = 'none';
+  stepDone('st2');
+  notify('已设置默认计时器区域 (' + label.toUpperCase() + ')', 'success');
+  checkSyncReady();
+}
+
+function clearROI(label) {
+  V[label].roi = null;
+  document.getElementById('roi-info-' + label).textContent = '未设置';
+  document.getElementById('roi-info-' + label).className = 'roi-info';
+  document.getElementById('roi-canvas-wrap-' + label).style.display = 'none';
+}
+
+// ─── Calibration ───
+function seekCalFrame(label) {
+  const inp = document.getElementById('cal-seek-' + label);
+  const t = parseFloat(inp.value);
+  if (isNaN(t) || t < 0) { notify('请输入有效时间（秒）', 'error'); return; }
+  seekTo(label, t);
+  document.getElementById('vid-' + label).pause();
+}
+
+function updateCalZoom(label) {
+  const vid = document.getElementById('vid-' + label);
+  const roi = V[label].roi;
+  const zoomCanvas = document.getElementById('cal-zoom-' + label);
+  const ctx = zoomCanvas.getContext('2d');
+
+  if (!vid.src || !vid.duration || !roi || !vid.videoWidth) {
+    ctx.clearRect(0, 0, zoomCanvas.width, zoomCanvas.height);
+    ctx.fillStyle = '#111';
+    ctx.fillRect(0, 0, zoomCanvas.width, zoomCanvas.height);
+    ctx.fillStyle = '#444';
+    ctx.font = '14px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('先加载视频并框选计时器', zoomCanvas.width/2, zoomCanvas.height/2+5);
+    return;
+  }
+
+  const vw = vid.videoWidth, vh = vid.videoHeight;
+  const rx = roi.x / 100 * vw, ry = roi.y / 100 * vh;
+  const rw = roi.w / 100 * vw, rh = roi.h / 100 * vh;
+
+  ctx.clearRect(0, 0, zoomCanvas.width, zoomCanvas.height);
+  ctx.drawImage(vid, rx, ry, rw, rh, 0, 0, zoomCanvas.width, zoomCanvas.height);
+}
+
+function addCalPoint(label) {
+  const vid = document.getElementById('vid-' + label);
+  if (!vid.src || !vid.duration) { notify('请先加载视频', 'error'); return; }
+  if (!V[label].roi) { notify('请先框选计时器区域', 'error'); return; }
+
+  const valInput = document.getElementById('cal-val-' + label);
+  const timerValue = parseFloat(valInput.value);
+  if (isNaN(timerValue) || timerValue < 0) {
+    notify('请输入有效的计时器数值（秒）', 'error');
+    return;
+  }
+
+  const videoTime = vid.currentTime;
+
+  // Check for duplicates (close enough)
+  const dup = V[label].pts.find(p => Math.abs(p.videoTime - videoTime) < 0.01);
+  if (dup) {
+    notify('该视频时间点已添加过校准点', 'error');
+    return;
+  }
+
+  V[label].pts.push({ videoTime, timerValue });
+  renderCalTable(label);
+  updateRegression(label);
+  valInput.value = '';
+  notify('校准点已添加 (' + label.toUpperCase() + ')', 'success');
+  stepDone('st3');
+  checkSyncReady();
+}
+
+function removeCalPoint(label, idx) {
+  V[label].pts.splice(idx, 1);
+  renderCalTable(label);
+  updateRegression(label);
+  checkSyncReady();
+}
+
+function renderCalTable(label) {
+  const tbody = document.getElementById('cal-tbody-' + label);
+  const pts = V[label].pts;
+  if (pts.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-dim);padding:8px;">暂无校准点，请在画面中寻找计时器特征帧，填入数值</td></tr>';
+    return;
+  }
+  tbody.innerHTML = pts.map((p, i) =>
+    `<tr>
+      <td>${i+1}</td>
+      <td style="font-variant-numeric:tabular-nums;">${fmt(p.videoTime)}</td>
+      <td style="font-variant-numeric:tabular-nums;color:var(--yellow);">${p.timerValue.toFixed(3)}s</td>
+      <td><span class="del-btn" onclick="removeCalPoint('${label}', ${i})">✕</span></td>
+    </tr>`
+  ).join('');
+}
+
+function updateRegression(label) {
+  const pts = V[label].pts;
+  const regBox = document.getElementById('reg-box-' + label);
+  if (pts.length < 2) {
+    regBox.classList.remove('show');
+    V[label].reg = null;
+    return;
+  }
+
+  // Linear regression: videoTime = a * timerValue + b
+  // x = timerValue, y = videoTime
+  const n = pts.length;
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0;
+  for (const p of pts) {
+    const x = p.timerValue, y = p.videoTime;
+    sumX += x; sumY += y;
+    sumXY += x * y;
+    sumX2 += x * x;
+  }
+  const meanX = sumX / n, meanY = sumY / n;
+  const a = (n * sumXY - sumX * sumY) / (n * sumX2 - sumX * sumX);
+  const b = meanY - a * meanX;
+
+  // R²
+  let ssRes = 0, ssTot = 0;
+  for (const p of pts) {
+    const yPred = a * p.timerValue + b;
+    ssRes += (p.videoTime - yPred) ** 2;
+    ssTot += (p.videoTime - meanY) ** 2;
+  }
+  const r2 = ssTot === 0 ? 1 : Math.max(0, 1 - ssRes / ssTot);
+
+  V[label].reg = { a, b, r2 };
+
+  document.getElementById('reg-a-' + label).textContent = a.toFixed(6);
+  document.getElementById('reg-b-' + label).textContent = b.toFixed(4);
+  document.getElementById('reg-r2-' + label).textContent = r2.toFixed(6);
+  regBox.classList.add('show');
+}
+
+// ─── Sync ───
+function checkSyncReady() {
+  const ra = V.a.reg, rb = V.b.reg;
+  if (!ra || !rb) {
+    document.getElementById('sync-section').classList.remove('show');
+    return;
+  }
+
+  // Determine timer range from calibration points
+  let tMin = Infinity, tMax = -Infinity;
+  for (const label of ['a', 'b']) {
+    for (const p of V[label].pts) {
+      if (p.timerValue < tMin) tMin = p.timerValue;
+      if (p.timerValue > tMax) tMax = p.timerValue;
+    }
+  }
+  // Expand slightly
+  const margin = (tMax - tMin) * 0.1 || 1;
+  syncTimerMin = Math.max(0, tMin - margin);
+  syncTimerMax = tMax + margin;
+  syncSliderSteps = 1000;
+  syncTimerTarget = syncTimerMin;
+
+  syncTimerMin = Math.max(0, tMin - (tMax - tMin) * 0.05);
+  syncTimerMax = tMax + (tMax - tMin) * 0.05;
+
+  const slider = document.getElementById('sync-slider');
+  slider.min = 0;
+  slider.max = syncSliderSteps;
+  slider.value = 0;
+
+  document.getElementById('sync-min').textContent = fmt(syncTimerMin);
+  document.getElementById('sync-max').textContent = fmt(syncTimerMax);
+
+  // Setup sync videos
+  const syncVA = document.getElementById('sync-vid-a');
+  const syncVB = document.getElementById('sync-vid-b');
+  syncVA.src = V.a.url;
+  syncVB.src = V.b.url;
+  syncVA.load(); syncVB.load();
+
+  syncVA.addEventListener('loadedmetadata', () => {
+    syncVA.currentTime = getSyncTime('a', syncTimerTarget);
+    syncVidSeek();
+  });
+  syncVB.addEventListener('loadedmetadata', () => {
+    syncVB.currentTime = getSyncTime('b', syncTimerTarget);
+    syncVidSeek();
+  });
+
+  function syncVidSeek() {
+    syncVA.currentTime = getSyncTime('a', syncTimerTarget) + V.a.syncOffset;
+    syncVB.currentTime = getSyncTime('b', syncTimerTarget) + V.b.syncOffset;
+    updateSyncDisplay();
+  }
+
+  document.getElementById('sync-section').classList.add('show');
+  stepDone('st4');
+  updateSyncDisplay();
+  notify('同步就绪！拖动滑块对齐画面 🎯', 'success');
+}
+
+function getSyncTime(label, timerVal) {
+  const reg = V[label].reg;
+  if (!reg) return 0;
+  return reg.a * timerVal + reg.b;
+}
+
+function onSyncSlider(val) {
+  const pct = val / syncSliderSteps;
+  syncTimerTarget = syncTimerMin + (syncTimerMax - syncTimerMin) * pct;
+  seekBothSync();
+}
+
+function seekBothSync() {
+  const vidA = document.getElementById('sync-vid-a');
+  const vidB = document.getElementById('sync-vid-b');
+  if (!vidA.src || !vidB.src) return;
+
+  const tA = getSyncTime('a', syncTimerTarget) + V.a.syncOffset;
+  const tB = getSyncTime('b', syncTimerTarget) + V.b.syncOffset;
+
+  vidA.currentTime = Math.max(0, Math.min(tA, vidA.duration || tA));
+  vidB.currentTime = Math.max(0, Math.min(tB, vidB.duration || tB));
+
+  updateSyncDisplay();
+}
+
+function updateSyncDisplay() {
+  document.getElementById('sync-timer-display').textContent = fmt(syncTimerTarget);
+  document.getElementById('svt-a').textContent = fmt(getSyncTime('a', syncTimerTarget) + V.a.syncOffset);
+  document.getElementById('svt-b').textContent = fmt(getSyncTime('b', syncTimerTarget) + V.b.syncOffset);
+  document.getElementById('stt-a').textContent = fmt(syncTimerTarget);
+  document.getElementById('stt-b').textContent = fmt(syncTimerTarget);
+}
+
+function syncFineTune(label, delta) {
+  V[label].syncOffset += delta;
+  seekBothSync();
+}
+
+// ─── Steps ───
+function stepDone(id) {
+  document.getElementById(id).classList.add('done');
+}
+
+// ─── Persistence ───
+const STORAGE_KEY = 'framesync_data';
+
+function saveState() {
+  const data = {
+    a: {
+      fileName: V.a.fileName,
+      roi: V.a.roi,
+      pts: V.a.pts,
+      reg: V.a.reg,
+      syncOffset: V.a.syncOffset
+    },
+    b: {
+      fileName: V.b.fileName,
+      roi: V.b.roi,
+      pts: V.b.pts,
+      reg: V.b.reg,
+      syncOffset: V.b.syncOffset
+    },
+    syncTimerTarget: syncTimerTarget,
+    savedAt: Date.now()
+  };
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
+  const badge = document.getElementById('saved-badge');
+  badge.classList.add('show');
+  setTimeout(() => badge.classList.remove('show'), 2000);
+  notify('校准数据已保存到浏览器', 'success');
+}
+
+function loadState() {
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (!raw) { notify('没有找到已保存的数据', 'error'); return; }
+  try {
+    const data = JSON.parse(raw);
+    // Restore non-video state
+    if (data.a) {
+      V.a.roi = data.a.roi || null;
+      V.a.pts = data.a.pts || [];
+      V.a.reg = data.a.reg || null;
+      V.a.syncOffset = data.a.syncOffset || 0;
+      if (V.a.fileName) document.getElementById('fname-a').textContent = V.a.fileName + ' (请重新加载)';
+      if (V.a.roi) {
+        document.getElementById('roi-info-a').textContent =
+          `已恢复: x=${V.a.roi.x.toFixed(1)}% y=${V.a.roi.y.toFixed(1)}% w=${V.a.roi.w.toFixed(1)}% h=${V.a.roi.h.toFixed(1)}%`;
+        document.getElementById('roi-info-a').className = 'roi-info ok';
+        stepDone('st2');
+      }
+      renderCalTable('a');
+      updateRegression('a');
+    }
+    if (data.b) {
+      V.b.roi = data.b.roi || null;
+      V.b.pts = data.b.pts || [];
+      V.b.reg = data.b.reg || null;
+      V.b.syncOffset = data.b.syncOffset || 0;
+      if (V.b.fileName) document.getElementById('fname-b').textContent = V.b.fileName + ' (请重新加载)';
+      if (V.b.roi) {
+        document.getElementById('roi-info-b').textContent =
+          `已恢复: x=${V.b.roi.x.toFixed(1)}% y=${V.b.roi.y.toFixed(1)}% w=${V.b.roi.w.toFixed(1)}% h=${V.b.roi.h.toFixed(1)}%`;
+        document.getElementById('roi-info-b').className = 'roi-info ok';
+        stepDone('st2');
+      }
+      renderCalTable('b');
+      updateRegression('b');
+    }
+    if (data.syncTimerTarget != null) syncTimerTarget = data.syncTimerTarget;
+    checkSyncReady();
+    notify('已恢复校准数据，请重新加载视频文件', 'info');
+  } catch(e) {
+    notify('数据恢复失败: ' + e.message, 'error');
+  }
+}
+
+function clearAll() {
+  if (!confirm('确定清除所有数据？')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  for (const label of ['a', 'b']) {
+    const s = V[label];
+    if (s.url) URL.revokeObjectURL(s.url);
+    s.video = null; s.url = null; s.fileName = '';
+    s.duration = 0; s.roi = null; s.pts = [];
+    s.reg = null; s.frameData = null; s.syncOffset = 0;
+    document.getElementById('vid-' + label).src = '';
+    document.getElementById('fname-' + label).textContent = '未选择';
+    document.getElementById('fname-' + label).className = 'filename';
+    document.getElementById('roi-info-' + label).textContent = '未设置';
+    document.getElementById('roi-info-' + label).className = 'roi-info';
+    document.getElementById('cal-tbody-' + label).innerHTML = '';
+    document.getElementById('reg-box-' + label).classList.remove('show');
+    document.getElementById('time-' + label).textContent = '00:00.000 / 00:00.000';
+  }
+  document.getElementById('sync-section').classList.remove('show');
+  for (const id of ['st1','st2','st3','st4']) document.getElementById(id).classList.remove('done');
+  notify('已全部清除', 'info');
+}
+
+// ─── Auto-save hook ───
+setInterval(() => {
+  // Only save if there's meaningful data
+  if (V.a.pts.length > 0 || V.b.pts.length > 0 || V.a.roi || V.b.roi) {
+    saveState();
+  }
+}, 30000); // every 30 seconds
+
+// ─── Auto-sync seek on video pause (candidate for adding cal point) ───
+document.addEventListener('DOMContentLoaded', () => {
+  // Setup video timeupdate listeners to refresh zoom during playback
+  for (const label of ['a', 'b']) {
+    const vid = document.getElementById('vid-' + label);
+    vid.addEventListener('timeupdate', () => {
+      // Throttle: only update zoom periodically
+      if (V[label].roi && vid.currentTime > 0) {
+        updateCalZoom(label);
+      }
+    });
+    vid.addEventListener('seeked', () => updateCalZoom(label));
+  }
+
+  // Show cal sections by default (hidden until video loaded)
+  document.getElementById('cal-section-a').style.display = 'block';
+  document.getElementById('cal-section-b').style.display = 'block';
+  // Draw initial zoom placeholders
+  updateCalZoom('a');
+  updateCalZoom('b');
+
+  // Load saved state on startup
+  const saved = localStorage.getItem(STORAGE_KEY);
+  if (saved) {
+    try {
+      const data = JSON.parse(saved);
+      const ago = Math.floor((Date.now() - data.savedAt) / 1000);
+      const mins = Math.floor(ago / 60);
+      if (mins < 60) {
+        notify(`发现已保存的校准数据（${mins}分钟前），点击「恢复数据」加载`, 'info');
+      }
+    } catch(e) { /* ignore */ }
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════
+// End FrameSync
+// ═══════════════════════════════════════════════════════════════
+</script>
+</body>
+</html>
