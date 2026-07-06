@@ -2,12 +2,22 @@
 
 两个带计时器的视频，手动标注计时器数值对齐两个视频，纯前端实现，无需任何后端。
 
-## 快速开始
+## 🚀 在线使用（无需安装）
 
-任何 HTTP 服务器打开 `index.html` 即可：
+直接打开 GitHub Pages 即可使用：
+
+👉 **https://testiphi.github.io/video-sync/**
+
+所有处理在浏览器本地完成，不上传任何文件。
+
+## 📦 本地运行
 
 ```bash
-# Python
+# 克隆仓库
+git clone https://github.com/Testiphi/video-sync.git
+cd video-sync
+
+# 任何 HTTP 服务器打开 index.html
 python -m http.server 8765
 # 浏览器打开 http://localhost:8765
 ```
