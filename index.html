@@ -890,15 +890,11 @@ function resampleFrame(label, idx) {
   s.pts[idx].timerValue = '';
   renderCalTable(label);
   updateRegression(label);
+  drawCalPreviews(label);
 
-  // Draw only THIS frame's preview (not all)
-  const version = (_previewVersion[label] || 0) + 1;
-  _previewVersion[label] = version;
-  drawOnePreview(label, idx, newTime, version);
-
-  // Seek main video to the new frame so user can verify
+  // Seek main video to the new frame after previews are drawn
   const vid = document.getElementById('vid-' + label);
-  if (vid) vid.currentTime = newTime;
+  setTimeout(() => { if (vid) vid.currentTime = newTime; }, 500);
 }
 
 function renderCalTable(label) {
