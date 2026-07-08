@@ -871,12 +871,12 @@ function resampleFrame(label, idx) {
   const s = V[label];
   const oldTime = s.pts[idx].videoTime;
   const usedTimes = new Set(s.pts.map(p => Math.round(p.videoTime * 1000)));
-  usedTimes.delete(Math.round(oldTime * 1000)); // allow the old time to be reused
+  usedTimes.delete(Math.round(oldTime * 1000));
 
   const safeStart = s.duration * 0.05;
   const safeEnd = s.duration * 0.95;
   let newTime = null;
-  for (let attempt = 0; attempt < 100; attempt++) {
+  for (let attempt = 0; attempt < 200; attempt++) {
     const t = safeStart + Math.random() * (safeEnd - safeStart);
     const key = Math.round(t * 1000);
     if (!usedTimes.has(key)) {
@@ -890,11 +890,15 @@ function resampleFrame(label, idx) {
   s.pts[idx].timerValue = '';
   renderCalTable(label);
   updateRegression(label);
-  drawCalPreviews(label);
+
+  // Draw only THIS frame's preview (not all)
+  const version = (_previewVersion[label] || 0) + 1;
+  _previewVersion[label] = version;
+  drawOnePreview(label, idx, newTime, version);
 
   // Seek main video to the new frame so user can verify
   const vid = document.getElementById('vid-' + label);
-  vid.currentTime = newTime;
+  if (vid) vid.currentTime = newTime;
 }
 
 function renderCalTable(label) {
@@ -931,27 +935,25 @@ function renderCalTable(label) {
 
 // ─── Draw calibration preview canvases ───
 
-let _previewQueue = {}; // label: { idx: time, ... }
+let _previewVersion = {}; // label → version counter
 
 function drawCalPreviews(label) {
   const pts = V[label].pts;
-  _previewQueue[label] = {};
+  const version = (_previewVersion[label] || 0) + 1;
+  _previewVersion[label] = version;
+
   for (let i = 0; i < pts.length; i++) {
-    _previewQueue[label][i] = pts[i].videoTime;
+    const time = pts[i].videoTime;
+    setTimeout(() => drawOnePreview(label, i, time, version), i * 80);
   }
-  processPreviewQueue(label);
 }
 
-function processPreviewQueue(label) {
-  const q = _previewQueue[label];
-  if (!q) return;
-  const keys = Object.keys(q);
-  if (keys.length === 0) return;
+function drawOnePreview(label, idx, time, version) {
+  // If a newer version was started, cancel this one
+  if (_previewVersion[label] !== version) return;
 
-  // Take the first entry
-  const idx = parseInt(keys[0]);
-  const time = q[idx];
-  delete q[idx];
+  const canvas = document.getElementById('cal-preview-' + label + '-' + idx);
+  if (!canvas) return;
 
   const vid = document.getElementById('vid-' + label);
   const roi = V[label].roi;
@@ -959,16 +961,13 @@ function processPreviewQueue(label) {
 
   vid.currentTime = Math.max(0, Math.min(time, vid.duration));
   vid.onseeked = () => {
-    const canvas = document.getElementById('cal-preview-' + label + '-' + idx);
-    if (canvas) {
-      const ctx = canvas.getContext('2d');
-      const vw = vid.videoWidth || 640, vh = vid.videoHeight || 360;
-      const rx = roi.x / 100 * vw, ry = roi.y / 100 * vh;
-      const rw = roi.w / 100 * vw, rh = roi.h / 100 * vh;
-      ctx.drawImage(vid, rx, ry, rw, rh, 0, 0, canvas.width, canvas.height);
-    }
-    // Process next in queue
-    setTimeout(() => processPreviewQueue(label), 50);
+    // Double-check: stale callback?
+    if (_previewVersion[label] !== version) return;
+    const ctx = canvas.getContext('2d');
+    const vw = vid.videoWidth || 640, vh = vid.videoHeight || 360;
+    const rx = roi.x / 100 * vw, ry = roi.y / 100 * vh;
+    const rw = roi.w / 100 * vw, rh = roi.h / 100 * vh;
+    ctx.drawImage(vid, rx, ry, rw, rh, 0, 0, canvas.width, canvas.height);
   };
 }
 
@@ -1113,7 +1112,7 @@ function resetAll() {
   document.getElementById('viewer').classList.remove('active');
   document.getElementById('roi-section').style.display = 'none';
   document.getElementById('cal-section').style.display = 'none';
-  _previewQueue = {};
+  _previewVersion = {};
   for (const id of ['s1','s2','s3','s4']) document.getElementById(id).classList.remove('step-done');
 }
 </script>
