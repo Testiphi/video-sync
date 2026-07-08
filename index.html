@@ -517,7 +517,7 @@ function drawROIZoom(label) {
   ctx.drawImage(vid, rx, ry, rw, rh, 0, 0, zoomCanvas.width, zoomCanvas.height);
 }
 
-// ─── Step 1: Load Video ───
+// ─── Step 1: Load Video (from path) ───
 
 function loadVideo(label) {
   const pathEl = document.getElementById('path-' + label);
@@ -556,7 +556,55 @@ function loadVideo(label) {
     showROISection();
 
     // Also set up sync video element
-    document.getElementById('sync-vid-' + label).src = path;
+    document.getElementById('sync-vid-' + label).src = s.url;
+    document.getElementById('sync-vid-' + label).load();
+  });
+}
+
+// ─── Load from File (blob URL) ───
+
+function loadFileFromBlob(label, file) {
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (!['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(ext)) { alert('不支持的视频格式: .' + ext); return; }
+
+  const blobUrl = URL.createObjectURL(file);
+  const panel = document.getElementById('panel-' + label);
+  const loadBtn = panel.querySelector('.row button:last-child');
+  if (loadBtn) { loadBtn.disabled = true; loadBtn.textContent = '加载中...'; }
+
+  // Show file name in path input
+  document.getElementById('path-' + label).value = '[文件] ' + file.name;
+  document.getElementById('path-' + label).disabled = false;
+
+  const vid = document.getElementById('vid-' + label);
+  vid.src = blobUrl;
+  vid.load();
+
+  vid.addEventListener('loadedmetadata', () => {
+    const s = V[label];
+    if (s.url) URL.revokeObjectURL(s.url);
+    s.url = blobUrl;
+    s.fileName = file.name;
+    s.loaded = true;
+    s.duration = vid.duration;
+    s.width = vid.videoWidth;
+    s.height = vid.videoHeight;
+    s.roi = null; s.pts = []; s.reg = null; s.offset = 0;
+
+    document.getElementById(`meta-${label}`).innerHTML =
+      `<span class="status-dot dot-ok"></span>${s.fileName} · ` +
+      `${s.width}×${s.height} · ${s.duration.toFixed(1)}s`;
+    panel.classList.add('loaded');
+    if (loadBtn) {
+      loadBtn.textContent = '🔄 重新选择';
+      loadBtn.onclick = function() { unloadVideo(label); };
+      loadBtn.disabled = false;
+    }
+    document.getElementById('s1').classList.add('step-done');
+    showROISection();
+
+    // Set up sync video
+    document.getElementById('sync-vid-' + label).src = blobUrl;
     document.getElementById('sync-vid-' + label).load();
   });
 }
@@ -565,8 +613,11 @@ function unloadVideo(label) {
   const s = V[label];
   if (s.pts.length > 0 && s.pts.some(p => p.timerValue) && !confirm('重新选择视频将丢失当前校准数据，确定？')) return;
 
-  s.loaded = false; s.url = null; s.fileName = ''; s.duration = 0;
+  s.loaded = false; s.fileName = ''; s.duration = 0;
   s.roi = null; s.pts = []; s.reg = null; s.offset = 0;
+
+  // Revoke old blob URL
+  if (s.url) { URL.revokeObjectURL(s.url); s.url = null; }
 
   document.getElementById('vid-' + label).src = '';
   document.getElementById('sync-vid-' + label).src = '';
@@ -604,17 +655,8 @@ function browseFile(label) {
 function handleFileSelect(label, input) {
   const file = input.files[0];
   if (!file) return;
-  // Try Chromium's full path support
-  if (file.path && file.path.length > 3) {
-    document.getElementById('path-' + label).value = file.path;
-    loadVideo(label);
-    input.value = '';
-    return;
-  }
-  // Fallback: paste the path manually
-  document.getElementById('path-' + label).value = file.name + '（请手动输入完整路径）';
   input.value = '';
-  alert('请手动输入视频文件完整路径，或直接拖放文件到面板');
+  loadFileFromBlob(label, file);
 }
 
 function setupDragDrop(label) {
@@ -627,12 +669,7 @@ function setupDragDrop(label) {
     if (!file) return;
     const ext = file.name.split('.').pop().toLowerCase();
     if (!['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(ext)) { alert('不支持的视频格式'); return; }
-    if (file.path && file.path.length > 3) {
-      document.getElementById('path-' + label).value = file.path;
-      loadVideo(label);
-      return;
-    }
-    alert('请手动输入视频文件完整路径');
+    loadFileFromBlob(label, file);
   });
 }
 
@@ -904,7 +941,8 @@ function updateStepIndicators() {
 function resetAll() {
   if (!confirm('确定重置全部？')) return;
   for (const label of ['a', 'b']) {
-    V[label].loaded = false; V[label].url = null; V[label].fileName = ''; V[label].duration = 0;
+    if (V[label].url) { URL.revokeObjectURL(V[label].url); V[label].url = null; }
+    V[label].loaded = false; V[label].fileName = ''; V[label].duration = 0;
     V[label].roi = null; V[label].pts = []; V[label].reg = null; V[label].offset = 0;
     document.getElementById('vid-' + label).src = '';
     document.getElementById('sync-vid-' + label).src = '';
