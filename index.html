@@ -890,11 +890,7 @@ function resampleFrame(label, idx) {
   s.pts[idx].timerValue = '';
   renderCalTable(label);
   updateRegression(label);
-  drawOneCalPreview(label, idx);
-
-  // Seek main video to the new frame
-  const vid = document.getElementById('vid-' + label);
-  if (vid) vid.currentTime = newTime;
+  drawCalPreviews(label);
 }
 
 function renderCalTable(label) {
