@@ -1030,13 +1030,37 @@ function buildIndex(label) {
 function checkSyncReady() {
   const ra = V.a.reg, rb = V.b.reg;
   if (!ra || !rb) { document.getElementById('viewer').classList.remove('active'); return; }
-  // 全范围外推: timer = (videoTime - b) / a
+
+  // 先用校准点范围做备选
+  let ptsMin = Infinity, ptsMax = -Infinity;
+  for (const label of ['a', 'b']) {
+    for (const p of V[label].pts) {
+      if (p.timerValue !== '' && p.timerValue != null) {
+        if (p.timerValue < ptsMin) ptsMin = p.timerValue;
+        if (p.timerValue > ptsMax) ptsMax = p.timerValue;
+      }
+    }
+  }
+  const margin = (ptsMax - ptsMin) * 0.1 || 1;
+
+  // 再算全范围外推
   const tA0 = (0 - ra.b) / ra.a,               tA1 = (V.a.duration - ra.b) / ra.a;
   const tB0 = (0 - rb.b) / rb.a,               tB1 = (V.b.duration - rb.b) / rb.a;
   const tAMin = Math.min(tA0, tA1), tAMax = Math.max(tA0, tA1);
   const tBMin = Math.min(tB0, tB1), tBMax = Math.max(tB0, tB1);
-  syncTimerMin = Math.max(tAMin, tBMin);
-  syncTimerMax = Math.min(tAMax, tBMax);
+
+  // 取外推的重叠范围
+  let extMin = Math.max(tAMin, tBMin);
+  let extMax = Math.min(tAMax, tBMax);
+
+  // 安全兜底: 外推范围无效或太小则退回校准点范围
+  if (extMin >= extMax || extMax - extMin < 0.5) {
+    extMin = Math.max(0, ptsMin - margin);
+    extMax = ptsMax + margin;
+  }
+
+  syncTimerMin = extMin;
+  syncTimerMax = extMax;
   syncTimerTarget = syncTimerMin;
   const slider = document.getElementById('sync-slider');
   slider.min = 0; slider.max = syncSteps; slider.value = 0;
