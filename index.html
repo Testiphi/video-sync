@@ -1030,11 +1030,13 @@ function buildIndex(label) {
 function checkSyncReady() {
   const ra = V.a.reg, rb = V.b.reg;
   if (!ra || !rb) { document.getElementById('viewer').classList.remove('active'); return; }
-  let tMin = Infinity, tMax = -Infinity;
-  for (const label of ['a', 'b']) { for (const p of V[label].pts) { if (p.timerValue < tMin) tMin = p.timerValue; if (p.timerValue > tMax) tMax = p.timerValue; } }
-  const margin = (tMax - tMin) * 0.1 || 1;
-  syncTimerMin = Math.max(0, tMin - margin);
-  syncTimerMax = tMax + margin;
+  // 全范围外推: timer = (videoTime - b) / a
+  const tA0 = (0 - ra.b) / ra.a,               tA1 = (V.a.duration - ra.b) / ra.a;
+  const tB0 = (0 - rb.b) / rb.a,               tB1 = (V.b.duration - rb.b) / rb.a;
+  const tAMin = Math.min(tA0, tA1), tAMax = Math.max(tA0, tA1);
+  const tBMin = Math.min(tB0, tB1), tBMax = Math.max(tB0, tB1);
+  syncTimerMin = Math.max(tAMin, tBMin);
+  syncTimerMax = Math.min(tAMax, tBMax);
   syncTimerTarget = syncTimerMin;
   const slider = document.getElementById('sync-slider');
   slider.min = 0; slider.max = syncSteps; slider.value = 0;
