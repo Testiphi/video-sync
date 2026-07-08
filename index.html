@@ -890,11 +890,11 @@ function resampleFrame(label, idx) {
   s.pts[idx].timerValue = '';
   renderCalTable(label);
   updateRegression(label);
-  drawCalPreviews(label);
+  drawOneCalPreview(label, idx);
 
-  // Seek main video to the new frame after previews are drawn
+  // Seek main video to the new frame
   const vid = document.getElementById('vid-' + label);
-  setTimeout(() => { if (vid) vid.currentTime = newTime; }, 500);
+  if (vid) vid.currentTime = newTime;
 }
 
 function renderCalTable(label) {
@@ -909,9 +909,10 @@ function renderCalTable(label) {
     return `<tr>
       <td style="vertical-align:middle;">${i+1}</td>
       <td style="text-align:center;vertical-align:middle;width:120px;">
-        <canvas id="cal-preview-${label}-${i}" width="160" height="36"
-                style="border-radius:4px;background:#111;width:120px;height:27px;cursor:pointer;image-rendering:pixelated"
-                onclick="jumpToCalFrame('${label}', ${i})" title="点击跳转到该帧"></canvas>
+        <img id="cal-preview-img-${label}-${i}"
+             src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+             style="border-radius:4px;width:120px;height:27px;cursor:pointer;background:#111;object-fit:cover"
+             onclick="jumpToCalFrame('${label}', ${i})" title="点击跳转到该帧">
       </td>
       <td>
         <input type="number" id="cal-input-${label}-${i}" step="0.001" min="0"
@@ -929,42 +930,57 @@ function renderCalTable(label) {
   updateCalButton(label);
 }
 
-// ─── Draw calibration preview canvases ───
+// ─── Draw calibration previews (independent <img> + temp video) ───
 
-let _previewVersion = {}; // label → version counter
+function captureFrameDataUrl(videoUrl, time, roi) {
+  return new Promise((resolve) => {
+    const vid = document.createElement('video');
+    vid.muted = true;
+    vid.preload = 'auto';
+    vid.src = videoUrl;
+    vid.currentTime = Math.max(0, Math.min(time, vid.duration || 1e9));
+    vid.onseeked = () => {
+      const vw = vid.videoWidth || 640, vh = vid.videoHeight || 360;
+      const rx = roi.x / 100 * vw, ry = roi.y / 100 * vh;
+      const rw = roi.w / 100 * vw, rh = roi.h / 100 * vh;
+      const c = document.createElement('canvas');
+      c.width = 160; c.height = 36;
+      c.getContext('2d').drawImage(vid, rx, ry, rw, rh, 0, 0, 160, 36);
+      resolve(c.toDataURL());
+      vid.remove();
+    };
+    vid.load();
+  });
+}
 
-function drawCalPreviews(label) {
+async function drawCalPreviews(label) {
   const pts = V[label].pts;
-  const version = (_previewVersion[label] || 0) + 1;
-  _previewVersion[label] = version;
-
+  const roi = V[label].roi;
+  if (!pts.length || !roi) return;
   for (let i = 0; i < pts.length; i++) {
-    const time = pts[i].videoTime;
-    setTimeout(() => drawOnePreview(label, i, time, version), i * 80);
+    const img = document.getElementById('cal-preview-img-' + label + '-' + i);
+    if (img) {
+      img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'; // 1px transparent loading
+      const dataUrl = await captureFrameDataUrl(V[label].url, pts[i].videoTime, roi);
+      if (document.getElementById('cal-preview-img-' + label + '-' + i) === img) {
+        img.src = dataUrl;
+      }
+    }
   }
 }
 
-function drawOnePreview(label, idx, time, version) {
-  // If a newer version was started, cancel this one
-  if (_previewVersion[label] !== version) return;
-
-  const canvas = document.getElementById('cal-preview-' + label + '-' + idx);
-  if (!canvas) return;
-
-  const vid = document.getElementById('vid-' + label);
+async function drawOneCalPreview(label, idx) {
+  const pt = V[label].pts[idx];
   const roi = V[label].roi;
-  if (!vid || !vid.src || !vid.duration || !roi) return;
-
-  vid.currentTime = Math.max(0, Math.min(time, vid.duration));
-  vid.onseeked = () => {
-    // Double-check: stale callback?
-    if (_previewVersion[label] !== version) return;
-    const ctx = canvas.getContext('2d');
-    const vw = vid.videoWidth || 640, vh = vid.videoHeight || 360;
-    const rx = roi.x / 100 * vw, ry = roi.y / 100 * vh;
-    const rw = roi.w / 100 * vw, rh = roi.h / 100 * vh;
-    ctx.drawImage(vid, rx, ry, rw, rh, 0, 0, canvas.width, canvas.height);
-  };
+  if (!pt || !roi) return;
+  const img = document.getElementById('cal-preview-img-' + label + '-' + idx);
+  if (img) {
+    img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    const dataUrl = await captureFrameDataUrl(V[label].url, pt.videoTime, roi);
+    if (document.getElementById('cal-preview-img-' + label + '-' + idx) === img) {
+      img.src = dataUrl;
+    }
+  }
 }
 
 function jumpToCalFrame(label, idx) {
@@ -1108,7 +1124,6 @@ function resetAll() {
   document.getElementById('viewer').classList.remove('active');
   document.getElementById('roi-section').style.display = 'none';
   document.getElementById('cal-section').style.display = 'none';
-  _previewVersion = {};
   for (const id of ['s1','s2','s3','s4']) document.getElementById(id).classList.remove('step-done');
 }
 </script>
