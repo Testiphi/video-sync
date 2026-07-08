@@ -347,22 +347,24 @@
       <div class="panel" id="cal-panel-a">
         <h2>视频 A <span class="label-a">· 校准</span></h2>
         <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">
-          ⏯️ 播放视频 → 在合适位置暂停 → 输入计时器数值 → 点击添加
+          👇 点击「采样5帧」生成随机画面 → 在每帧预览中读取计时器数值并填入 → 满足2个点后构建索引
         </div>
         <div class="row">
-          <input type="number" id="cal-inp-a" step="0.001" min="0" placeholder="当前画面计时器秒数" style="width:200px;"
+          <button onclick="autoSample('a')">🎲 采样5帧</button>
+          <div style="flex:1;min-width:80px;"></div>
+          <input type="number" id="cal-inp-a" step="0.001" min="0" placeholder="或手动输入当前画面计时器秒数" style="width:200px;"
                  onkeydown="if(event.key==='Enter') addCalPoint('a')">
           <button class="green" onclick="addCalPoint('a')">➕ 添加</button>
         </div>
         <div id="cal-zoom-a" style="display:none;margin-bottom:6px;">
           <canvas id="cal-zoom-canvas-a" width="320" height="60"
                   style="border-radius:4px;background:#000;width:100%;max-width:320px;image-rendering:pixelated"></canvas>
-          <div style="font-size:10px;color:var(--text-dim);margin:2px 0 6px;">↑ 计时器区域放大（ROI 裁剪）</div>
+          <div style="font-size:10px;color:var(--text-dim);margin:2px 0 6px;">↑ 计时器区域放大（点击预览可跳转）</div>
         </div>
         <table class="cal-table" id="cal-table-a">
-          <thead><tr><th>#</th><th>视频时间</th><th>计时器值</th><th></th></tr></thead>
+          <thead><tr><th>#</th><th>画面预览</th><th>计时器值</th><th></th><th>操作</th></tr></thead>
           <tbody id="cal-body-a">
-            <tr><td colspan="4" style="color:var(--text-dim);padding:8px;">暂无校准点，拖动/播放视频到合适位置后添加</td></tr>
+            <tr><td colspan="5" style="color:var(--text-dim);padding:8px;">点击「采样5帧」自动生成随机采样点，或手动添加</td></tr>
           </tbody>
         </table>
         <div class="row">
@@ -373,22 +375,24 @@
       <div class="panel" id="cal-panel-b">
         <h2>视频 B <span class="label-b">· 校准</span></h2>
         <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">
-          ⏯️ 播放视频 → 在合适位置暂停 → 输入计时器数值 → 点击添加
+          👇 点击「采样5帧」生成随机画面 → 在每帧预览中读取计时器数值并填入 → 满足2个点后构建索引
         </div>
         <div class="row">
-          <input type="number" id="cal-inp-b" step="0.001" min="0" placeholder="当前画面计时器秒数" style="width:200px;"
+          <button onclick="autoSample('b')">🎲 采样5帧</button>
+          <div style="flex:1;min-width:80px;"></div>
+          <input type="number" id="cal-inp-b" step="0.001" min="0" placeholder="或手动输入当前画面计时器秒数" style="width:200px;"
                  onkeydown="if(event.key==='Enter') addCalPoint('b')">
           <button class="green" onclick="addCalPoint('b')">➕ 添加</button>
         </div>
         <div id="cal-zoom-b" style="display:none;margin-bottom:6px;">
           <canvas id="cal-zoom-canvas-b" width="320" height="60"
                   style="border-radius:4px;background:#000;width:100%;max-width:320px;image-rendering:pixelated"></canvas>
-          <div style="font-size:10px;color:var(--text-dim);margin:2px 0 6px;">↑ 计时器区域放大（ROI 裁剪）</div>
+          <div style="font-size:10px;color:var(--text-dim);margin:2px 0 6px;">↑ 计时器区域放大（点击预览可跳转）</div>
         </div>
         <table class="cal-table" id="cal-table-b">
-          <thead><tr><th>#</th><th>视频时间</th><th>计时器值</th><th></th></tr></thead>
+          <thead><tr><th>#</th><th>画面预览</th><th>计时器值</th><th></th><th>操作</th></tr></thead>
           <tbody id="cal-body-b">
-            <tr><td colspan="4" style="color:var(--text-dim);padding:8px;">暂无校准点，拖动/播放视频到合适位置后添加</td></tr>
+            <tr><td colspan="5" style="color:var(--text-dim);padding:8px;">点击「采样5帧」自动生成随机采样点，或手动添加</td></tr>
           </tbody>
         </table>
         <div class="row">
@@ -627,7 +631,7 @@ function unloadVideo(label) {
   document.getElementById(`roi-meta-${label}`).style.color = '';
   document.getElementById(`cal-meta-${label}`).textContent = '等待校准';
   document.getElementById(`cal-body-${label}`).innerHTML =
-    '<tr><td colspan="4" style="color:var(--text-dim);padding:8px;">暂无校准点，拖动/播放视频到合适位置后添加</td></tr>';
+    '<tr><td colspan="5" style="color:var(--text-dim);padding:8px;">点击「采样5帧」自动生成随机采样点，或手动添加</td></tr>';
   document.getElementById(`build-${label}`).disabled = true;
   document.getElementById(`build-${label}`).textContent = '构建索引';
   document.getElementById('viewer').classList.remove('active');
@@ -797,6 +801,39 @@ function showCalSection() {
   }
 }
 
+// ─── Auto Sample: 5 random frames ───
+
+function autoSample(label) {
+  const s = V[label];
+  if (!s.loaded || !s.roi) { alert('请先加载视频并框选计时器区域'); return; }
+
+  const n = 5;
+  const usedTimes = new Set();
+  const newPts = [];
+  const safeStart = s.duration * 0.05;
+  const safeEnd = s.duration * 0.95;
+
+  for (let i = 0; i < n; i++) {
+    for (let attempt = 0; attempt < 50; attempt++) {
+      const t = safeStart + Math.random() * (safeEnd - safeStart);
+      // Round to millisecond precision to avoid near-duplicates
+      const key = Math.round(t * 1000);
+      if (!usedTimes.has(key)) {
+        usedTimes.add(key);
+        newPts.push({ videoTime: t, timerValue: '' });
+        break;
+      }
+    }
+  }
+
+  // Replace existing pts with new samples (preserving any manually added with values)
+  const manualPts = s.pts.filter(p => p.timerValue !== '' && p.timerValue != null);
+  s.pts = [...manualPts, ...newPts];
+  renderCalTable(label);
+  updateRegression(label);
+  drawCalPreviews(label);
+}
+
 function addCalPoint(label) {
   const s = V[label];
   const vid = document.getElementById('vid-' + label);
@@ -818,25 +855,137 @@ function removeCalPoint(label, idx) {
   updateRegression(label);
 }
 
+function updateCalTimer(label, idx, val) {
+  val = val.trim();
+  V[label].pts[idx].timerValue = val ? parseFloat(val) : '';
+  const okEl = document.getElementById('cal-ok-' + label + '-' + idx);
+  if (okEl) {
+    okEl.textContent = val ? '✓' : '◌';
+    okEl.style.color = val ? 'var(--accent2)' : 'var(--text-dim)';
+  }
+  updateCalButton(label);
+  updateRegression(label);
+}
+
+function resampleFrame(label, idx) {
+  const s = V[label];
+  const oldTime = s.pts[idx].videoTime;
+  const usedTimes = new Set(s.pts.map(p => Math.round(p.videoTime * 1000)));
+  usedTimes.delete(Math.round(oldTime * 1000)); // allow the old time to be reused
+
+  const safeStart = s.duration * 0.05;
+  const safeEnd = s.duration * 0.95;
+  let newTime = null;
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const t = safeStart + Math.random() * (safeEnd - safeStart);
+    const key = Math.round(t * 1000);
+    if (!usedTimes.has(key)) {
+      newTime = t;
+      break;
+    }
+  }
+  if (newTime === null) newTime = safeStart + Math.random() * (safeEnd - safeStart);
+
+  s.pts[idx].videoTime = newTime;
+  s.pts[idx].timerValue = '';
+  renderCalTable(label);
+  updateRegression(label);
+  drawCalPreviews(label);
+
+  // Seek main video to the new frame so user can verify
+  const vid = document.getElementById('vid-' + label);
+  vid.currentTime = newTime;
+}
+
 function renderCalTable(label) {
   const tbody = document.getElementById('cal-body-' + label);
   const pts = V[label].pts;
   if (pts.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-dim);padding:8px;">暂无校准点，拖动/播放视频到合适位置后添加</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-dim);padding:8px;">点击「采样5帧」自动生成随机采样点，或手动添加</td></tr>';
     return;
   }
-  tbody.innerHTML = pts.map((p, i) =>
-    `<tr><td>${i+1}</td><td style="font-variant-numeric:tabular-nums;">${fmt(p.videoTime)}</td><td style="font-variant-numeric:tabular-nums;color:var(--accent);">${p.timerValue.toFixed(3)}s</td><td><span class="del" onclick="removeCalPoint('${label}', ${i})">✕</span></td></tr>`
-  ).join('');
+  tbody.innerHTML = pts.map((p, i) => {
+    const hasVal = p.timerValue !== '' && p.timerValue != null;
+    return `<tr>
+      <td style="vertical-align:middle;">${i+1}</td>
+      <td style="text-align:center;vertical-align:middle;width:120px;">
+        <canvas id="cal-preview-${label}-${i}" width="160" height="36"
+                style="border-radius:4px;background:#111;width:120px;height:27px;cursor:pointer;image-rendering:pixelated"
+                onclick="jumpToCalFrame('${label}', ${i})" title="点击跳转到该帧"></canvas>
+      </td>
+      <td>
+        <input type="number" id="cal-input-${label}-${i}" step="0.001" min="0"
+               placeholder="秒" ${hasVal ? 'value="' + p.timerValue + '"' : ''}
+               onchange="updateCalTimer('${label}', ${i}, this.value)"
+               style="width:100px;padding:4px 6px;font-size:12px;">
+      </td>
+      <td><span class="ok" id="cal-ok-${label}-${i}">${hasVal ? '✓' : '◌'}</span></td>
+      <td style="white-space:nowrap;">
+        <button class="secondary" style="font-size:10px;padding:1px 6px;" onclick="resampleFrame('${label}', ${i})">🎲</button>
+        <button class="danger" style="font-size:10px;padding:1px 6px;" onclick="removeCalPoint('${label}', ${i})">✕</button>
+      </td>
+    </tr>`;
+  }).join('');
   updateCalButton(label);
 }
 
-function updateRegression(label) {
+// ─── Draw calibration preview canvases ───
+
+let _previewQueue = {}; // label: { idx: time, ... }
+
+function drawCalPreviews(label) {
   const pts = V[label].pts;
+  _previewQueue[label] = {};
+  for (let i = 0; i < pts.length; i++) {
+    _previewQueue[label][i] = pts[i].videoTime;
+  }
+  processPreviewQueue(label);
+}
+
+function processPreviewQueue(label) {
+  const q = _previewQueue[label];
+  if (!q) return;
+  const keys = Object.keys(q);
+  if (keys.length === 0) return;
+
+  // Take the first entry
+  const idx = parseInt(keys[0]);
+  const time = q[idx];
+  delete q[idx];
+
+  const vid = document.getElementById('vid-' + label);
+  const roi = V[label].roi;
+  if (!vid || !vid.src || !vid.duration || !roi) return;
+
+  vid.currentTime = Math.max(0, Math.min(time, vid.duration));
+  vid.onseeked = () => {
+    const canvas = document.getElementById('cal-preview-' + label + '-' + idx);
+    if (canvas) {
+      const ctx = canvas.getContext('2d');
+      const vw = vid.videoWidth || 640, vh = vid.videoHeight || 360;
+      const rx = roi.x / 100 * vw, ry = roi.y / 100 * vh;
+      const rw = roi.w / 100 * vw, rh = roi.h / 100 * vh;
+      ctx.drawImage(vid, rx, ry, rw, rh, 0, 0, canvas.width, canvas.height);
+    }
+    // Process next in queue
+    setTimeout(() => processPreviewQueue(label), 50);
+  };
+}
+
+function jumpToCalFrame(label, idx) {
+  const time = V[label].pts[idx]?.videoTime;
+  if (time == null) return;
+  const vid = document.getElementById('vid-' + label);
+  if (vid) vid.currentTime = time;
+}
+
+function updateRegression(label) {
+  // Only use points that have a valid timer value
+  const pts = V[label].pts.filter(p => p.timerValue !== '' && p.timerValue != null);
   const calMeta = document.getElementById('cal-meta-' + label);
   if (pts.length < 2) {
     V[label].reg = null;
-    calMeta.textContent = `已采集 ${pts.length} 个点，需要至少 2 个`;
+    calMeta.textContent = `已采集 ${pts.length}/${V[label].pts.length} 个有效点，需要至少 2 个`;
     document.getElementById(`build-${label}`).disabled = true;
     return;
   }
@@ -850,16 +999,16 @@ function updateRegression(label) {
   for (const p of pts) { const yp = a * p.timerValue + b; ssr += (p.videoTime - yp) ** 2; sst += (p.videoTime - my) ** 2; }
   const r2 = sst === 0 ? 1 : Math.max(0, 1 - ssr / sst);
   V[label].reg = { a, b, r2 };
-  calMeta.textContent = `✅ 已索引: ${pts.length} 个校准点 · 视频时间 = ${a.toFixed(6)} × 计时器 + ${b.toFixed(4)} · R² = ${r2.toFixed(6)}`;
+  calMeta.textContent = `✅ 已索引: ${pts.length}/${V[label].pts.length} 个有效校准点 · 视频时间 = ${a.toFixed(6)} × 计时器 + ${b.toFixed(4)} · R² = ${r2.toFixed(6)}`;
   updateCalButton(label);
   checkSyncReady();
 }
 
 function updateCalButton(label) {
-  const pts = V[label].pts;
+  const valid = V[label].pts.filter(p => p.timerValue !== '' && p.timerValue != null).length;
   const btn = document.getElementById('build-' + label);
-  if (pts.length >= 2 && V[label].reg) { btn.disabled = false; btn.textContent = `构建索引 (${pts.length}个点)`; }
-  else { btn.disabled = true; btn.textContent = `需要至少2个点 (已${pts.length}个)`; }
+  if (valid >= 2 && V[label].reg) { btn.disabled = false; btn.textContent = `构建索引 (${valid}个有效点)`; }
+  else { btn.disabled = true; btn.textContent = `需要至少2个有效点 (已${valid}个)`; }
 }
 
 function buildIndex(label) {
@@ -951,7 +1100,7 @@ function resetAll() {
     document.getElementById(`roi-meta-${label}`).textContent = '未设置';
     document.getElementById(`roi-meta-${label}`).style.color = '';
     document.getElementById(`cal-meta-${label}`).textContent = '等待校准';
-    document.getElementById(`cal-body-${label}`).innerHTML = '<tr><td colspan="4" style="color:var(--text-dim);padding:8px;">暂无校准点，拖动/播放视频到合适位置后添加</td></tr>';
+    document.getElementById(`cal-body-${label}`).innerHTML = '<tr><td colspan="5" style="color:var(--text-dim);padding:8px;">点击「采样5帧」自动生成随机采样点，或手动添加</td></tr>';
     const buildBtn = document.getElementById(`build-${label}`);
     if (buildBtn) { buildBtn.disabled = true; buildBtn.textContent = '构建索引'; }
     document.getElementById('roi-overlay-' + label).style.display = 'none';
@@ -964,6 +1113,7 @@ function resetAll() {
   document.getElementById('viewer').classList.remove('active');
   document.getElementById('roi-section').style.display = 'none';
   document.getElementById('cal-section').style.display = 'none';
+  _previewQueue = {};
   for (const id of ['s1','s2','s3','s4']) document.getElementById(id).classList.remove('step-done');
 }
 </script>
