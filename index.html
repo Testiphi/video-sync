@@ -535,8 +535,6 @@ function loadVideo(label) {
   loadBtn.textContent = '加载中...';
 
   const vid = document.getElementById('vid-' + label);
-  vid.src = path;
-  vid.load();
 
   vid.addEventListener('loadedmetadata', () => {
     const s = V[label];
@@ -563,6 +561,8 @@ function loadVideo(label) {
     document.getElementById('sync-vid-' + label).src = s.url;
     document.getElementById('sync-vid-' + label).load();
   });
+  vid.src = path;
+  vid.load();
 }
 
 // ─── Load from File (blob URL) ───
@@ -581,8 +581,6 @@ function loadFileFromBlob(label, file) {
   document.getElementById('path-' + label).disabled = false;
 
   const vid = document.getElementById('vid-' + label);
-  vid.src = blobUrl;
-  vid.load();
 
   vid.addEventListener('loadedmetadata', () => {
     const s = V[label];
@@ -611,6 +609,8 @@ function loadFileFromBlob(label, file) {
     document.getElementById('sync-vid-' + label).src = blobUrl;
     document.getElementById('sync-vid-' + label).load();
   });
+  vid.src = blobUrl;
+  vid.load();
 }
 
 function unloadVideo(label) {
@@ -933,9 +933,11 @@ function captureFrameDataUrl(videoUrl, time, roi) {
     const vid = document.createElement('video');
     vid.muted = true;
     vid.preload = 'auto';
-    vid.src = videoUrl;
-    vid.currentTime = Math.max(0, Math.min(time, vid.duration || 1e9));
-    vid.onseeked = () => {
+    // 先注册事件，再设 src/load
+    vid.addEventListener('loadedmetadata', () => {
+      vid.currentTime = Math.max(0, Math.min(time, vid.duration));
+    }, { once: true });
+    vid.addEventListener('seeked', () => {
       const vw = vid.videoWidth || 640, vh = vid.videoHeight || 360;
       const rx = roi.x / 100 * vw, ry = roi.y / 100 * vh;
       const rw = roi.w / 100 * vw, rh = roi.h / 100 * vh;
@@ -944,7 +946,8 @@ function captureFrameDataUrl(videoUrl, time, roi) {
       c.getContext('2d').drawImage(vid, rx, ry, rw, rh, 0, 0, 160, 36);
       resolve(c.toDataURL());
       vid.remove();
-    };
+    }, { once: true });
+    vid.src = videoUrl;
     vid.load();
   });
 }
