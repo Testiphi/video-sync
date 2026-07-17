@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FrameSync — 视频同帧同步对比</title>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
 <style>
   :root {
     --bg: #0f1117;
@@ -234,6 +235,12 @@
   }
   .panel.loaded .drop-hint { display: none; }
 
+  /* Tesseract OCR */
+  .ocr-btn { background: #7c3aed; }
+  .ocr-btn:hover { opacity: .85; }
+  .ocr-btn:disabled { opacity: .4; }
+  .ocr-status { font-size: 11px; color: var(--text-dim); padding: 2px 0; line-height: 1.5; }
+
   @media (max-width: 900px) {
     .grid { grid-template-columns: 1fr; }
     .viewer-grid { grid-template-columns: 1fr; }
@@ -351,6 +358,7 @@
         </div>
         <div class="row">
           <button onclick="autoSample('a')">🎲 采样5帧</button>
+          <button class="ocr-btn" id="ocr-btn-a" onclick="ocrAllSamples('a')">🔍 Tesseract OCR</button>
           <div style="flex:1;min-width:80px;"></div>
           <input type="number" id="cal-inp-a" step="0.001" min="0" placeholder="或手动输入当前画面计时器秒数" style="width:200px;"
                  onkeydown="if(event.key==='Enter') addCalPoint('a')">
@@ -370,6 +378,7 @@
         <div class="row">
           <button class="green" onclick="buildIndex('a')" id="build-a" disabled>构建索引</button>
         </div>
+        <div class="ocr-status" id="ocr-status-a">🔍 点击「Tesseract OCR」自动识别计时器</div>
         <div class="meta" id="cal-meta-a">等待校准</div>
       </div>
       <div class="panel" id="cal-panel-b">
@@ -379,6 +388,7 @@
         </div>
         <div class="row">
           <button onclick="autoSample('b')">🎲 采样5帧</button>
+          <button class="ocr-btn" id="ocr-btn-b" onclick="ocrAllSamples('b')">🔍 Tesseract OCR</button>
           <div style="flex:1;min-width:80px;"></div>
           <input type="number" id="cal-inp-b" step="0.001" min="0" placeholder="或手动输入当前画面计时器秒数" style="width:200px;"
                  onkeydown="if(event.key==='Enter') addCalPoint('b')">
@@ -398,6 +408,7 @@
         <div class="row">
           <button class="green" onclick="buildIndex('b')" id="build-b" disabled>构建索引</button>
         </div>
+        <div class="ocr-status" id="ocr-status-b">🔍 点击「Tesseract OCR」自动识别计时器</div>
         <div class="meta" id="cal-meta-b">等待校准</div>
       </div>
     </div>
@@ -992,7 +1003,6 @@ function jumpToCalFrame(label, idx) {
 }
 
 function updateRegression(label) {
-  // Only use points that have a valid timer value
   const pts = V[label].pts.filter(p => p.timerValue !== '' && p.timerValue != null);
   const calMeta = document.getElementById('cal-meta-' + label);
   if (pts.length < 2) {
@@ -1001,17 +1011,57 @@ function updateRegression(label) {
     document.getElementById(`build-${label}`).disabled = true;
     return;
   }
-  const n = pts.length;
-  let sx = 0, sy = 0, sxy = 0, sx2 = 0;
-  for (const p of pts) { const x = p.timerValue, y = p.videoTime; sx += x; sy += y; sxy += x * y; sx2 += x * x; }
-  const mx = sx / n, my = sy / n;
-  const a = (n * sxy - sx * sy) / (n * sx2 - sx * sx);
-  const b = my - a * mx;
+  
+  // Theil-Sen 稳健回归：取所有点对斜率的中位数
+  const slopes = [];
+  for (let i = 0; i < pts.length; i++) {
+    for (let j = i + 1; j < pts.length; j++) {
+      const dx = pts[j].timerValue - pts[i].timerValue;
+      if (Math.abs(dx) > 0.0001) {
+        slopes.push((pts[j].videoTime - pts[i].videoTime) / dx);
+      }
+    }
+  }
+  slopes.sort((a, b) => a - b);
+  const a = slopes.length > 0 ? slopes[Math.floor(slopes.length / 2)] : 0;
+  
+  // 截距中位数
+  const intercepts = pts.map(p => p.videoTime - a * p.timerValue);
+  intercepts.sort((a, b) => a - b);
+  const b = intercepts.length > 0 ? intercepts[Math.floor(intercepts.length / 2)] : 0;
+  
+  // R²
   let ssr = 0, sst = 0;
-  for (const p of pts) { const yp = a * p.timerValue + b; ssr += (p.videoTime - yp) ** 2; sst += (p.videoTime - my) ** 2; }
+  const meanY = pts.reduce((s, p) => s + p.videoTime, 0) / pts.length;
+  for (const p of pts) {
+    const yp = a * p.timerValue + b;
+    ssr += (p.videoTime - yp) ** 2;
+    sst += (p.videoTime - meanY) ** 2;
+  }
   const r2 = sst === 0 ? 1 : Math.max(0, 1 - ssr / sst);
   V[label].reg = { a, b, r2 };
-  calMeta.textContent = `✅ 已索引: ${pts.length}/${V[label].pts.length} 个有效校准点 · 视频时间 = ${a.toFixed(6)} × 计时器 + ${b.toFixed(4)} · R² = ${r2.toFixed(6)}`;
+  
+  // 离群点检测
+  let worstRes = 0, worstIdx = -1;
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    const predicted = a * p.timerValue + b;
+    const res = Math.abs(p.videoTime - predicted);
+    if (res > worstRes) { worstRes = res; worstIdx = i; }
+  }
+  
+  let warnText = '';
+  if (worstRes > 1.0 && pts.length >= 3) {
+    // 定位到原始表索引
+    const origIdx = V[label].pts.findIndex(p => p === pts[worstIdx]);
+    warnText = ` ⚠️ 第${origIdx+1}点误差${worstRes.toFixed(1)}s，请检查`;
+    // 标红该行输入框
+    const inp = document.getElementById(`cal-input-${label}-${origIdx}`);
+    if (inp) inp.style.background = '#3a1020';
+  }
+  
+  calMeta.textContent =
+    `✅ 稳健回归: ${pts.length}点 · 视频 = ${a.toFixed(6)}×计时器 + ${b.toFixed(4)} · R²=${r2.toFixed(4)}${warnText}`;
   updateCalButton(label);
   checkSyncReady();
 }
@@ -1152,6 +1202,213 @@ function resetAll() {
   document.getElementById('roi-section').style.display = 'none';
   document.getElementById('cal-section').style.display = 'none';
   for (const id of ['s1','s2','s3','s4']) document.getElementById(id).classList.remove('step-done');
+}
+
+// ════════════════════════════════════════════════════════
+// Tesseract.js OCR 引擎
+// ════════════════════════════════════════════════════════
+
+const OCR = {
+  worker: null,
+  ready: false,
+  debug: true,
+};
+
+async function ocrInit() {
+  if (OCR.ready) return true;
+  try {
+    if (typeof Tesseract === 'undefined') {
+      console.warn('[OCR] Tesseract.js 未加载');
+      return false;
+    }
+    OCR.worker = await Tesseract.createWorker('eng', 1, {
+      logger: m => { if (m.status === 'loading tesseract core') console.log('[OCR] 加载内核…'); }
+    });
+    await OCR.worker.setParameters({
+      tessedit_char_whitelist: '0123456789.:',
+      tessedit_pageseg_mode: '8',  // 单个词 — 适合 MM:SS.mmm 格式
+    });
+    OCR.ready = true;
+    console.log('[OCR] Tesseract 就绪');
+    return true;
+  } catch (e) {
+    console.error('[OCR] 初始化失败:', e);
+    return false;
+  }
+}
+
+// 解析 Tesseract 输出为秒数（鲁棒版）
+function ocrParseTimer(text) {
+  if (!text || !text.trim()) return null;
+  
+  // 清理：去空格、全角冒号、非数字字符（保留 : 和 .）
+  let t = text.trim().replace(/\s+/g, '').replace(/：/g, ':');
+  
+  // 提取所有可能的 MM:SS.mmm / SS.mmm / SSS.mmm 格式
+  // 用正则一次性从文本中尽量提取合法计时器
+  const candidates = [];
+  
+  // 尝试匹配 MM:SS.mmm 或 MM:SS
+  const m1 = t.match(/(\d{1,2}):(\d{2})(?:\.(\d+))?/);
+  if (m1) {
+    const mm = parseInt(m1[1]);
+    const ss = parseInt(m1[2]);
+    const ms = m1[3] ? parseInt(m1[3].padEnd(3,'0').slice(0,3)) : 0;
+    if (mm < 60 && ss < 60) candidates.push(mm * 60 + ss + ms / 1000);
+    // 如果分钟过大但秒数合理，也作为候选
+    candidates.push(mm * 60 + ss + ms / 1000);
+  }
+  
+  // 尝试匹配 SS.mmm 或 SS.m 等（无冒号）
+  const m2 = t.match(/(\d+)\.(\d+)/);
+  if (m2) {
+    const intP = parseInt(m2[1]);
+    const fracP = parseInt(m2[2].padEnd(3,'0').slice(0,3));
+    candidates.push(intP + fracP / 1000);
+  }
+  
+  // 尝试纯数字（4-9位），按长度推断
+  const m3 = t.match(/(\d{4,9})/);
+  if (m3) {
+    const s = m3[1];
+    if (s.length === 7) {
+      candidates.push(parseInt(s.slice(0,2))*60 + parseInt(s.slice(2,4)) + parseInt(s.slice(4,7))/1000);
+    } else if (s.length >= 4) {
+      candidates.push(parseInt(s.slice(0,-3)) + parseInt(s.slice(-3))/1000);
+    }
+  }
+  
+  if (candidates.length === 0) return null;
+  
+  // 选最合理的值：在 0-3600 秒内且最接近中间值的那个
+  const valid = candidates.filter(v => v >= 0 && v < 3600);
+  if (valid.length === 0) return candidates[0];
+  if (valid.length === 1) return valid[0];
+  
+  // 多个候选：选值较小且不在极端范围的那个
+  // 排除极值（>1000s 通常是幻觉）
+  const plausible = valid.filter(v => v < 600);
+  if (plausible.length === 1) return plausible[0];
+  if (plausible.length > 1) plausible.sort((a,b) => a - b);
+  return plausible[0] || valid[0];
+}
+
+// 帧捕获（复用已加载的 video 元素，避免新建）
+async function ocrGrabFrame(label, time) {
+  const vid = document.getElementById('vid-' + label);
+  const s = V[label];
+  if (!vid || !vid.src || !s.roi) return null;
+  
+  const t = Math.max(0, Math.min(time, vid.duration - 0.001 || 0));
+  
+  // 强制在 seek 前暂停（解决连续 seek 跳过渲染的问题）
+  vid.pause();
+  vid.currentTime = t;
+  
+  // 确保等待到实际的 seeked 事件
+  await new Promise(resolve => {
+    const to = setTimeout(resolve, 2000);
+    const onSeeked = () => { clearTimeout(to); resolve(); };
+    vid.addEventListener('seeked', onSeeked, { once: true });
+    // 如果已经是目标时间同时 seeked 也触发不了，用 RAF 兜底
+  });
+  
+  // 等两帧确保新画面已解码渲染
+  await new Promise(r => requestAnimationFrame(r));
+  await new Promise(r => requestAnimationFrame(r));
+  
+  const vw = vid.videoWidth || 640, vh = vid.videoHeight || 360;
+  const rx = s.roi.x / 100 * vw, ry = s.roi.y / 100 * vh;
+  const rw = s.roi.w / 100 * vw, rh = s.roi.h / 100 * vh;
+  
+  // 直接捕获到更大画布（不用中间 Image）
+  const c = document.createElement('canvas');
+  c.width = 640; c.height = 144;
+  c.getContext('2d').drawImage(vid, rx, ry, rw, rh, 0, 0, 640, 144);
+  return c;
+}
+
+// 单帧 OCR
+async function ocrOneFrame(label, time) {
+  try {
+    const canvas = await ocrGrabFrame(label, time);
+    if (!canvas || canvas.width < 10) return { value: null, confidence: 0, debug: '帧捕获失败' };
+    
+    const { data } = await OCR.worker.recognize(canvas);
+    const text = (data.text || '').trim();
+    const confidence = (data.confidence || 0) / 100;
+    
+    if (OCR.debug) console.log(`[OCR] 原文: "${text}" 置信度: ${(confidence*100).toFixed(0)}%`);
+    
+    const value = ocrParseTimer(text);
+    return { value, confidence, debug: `"${text}"` };
+  } catch (e) {
+    return { value: null, confidence: 0, debug: e.message };
+  }
+}
+
+// 公共 API：识别所有采样点
+async function ocrAllSamples(label) {
+  const s = V[label];
+  if (!s.loaded || !s.roi) { alert('请先加载视频并框选计时器区域'); return; }
+  if (s.pts.length === 0) { alert('请先点击「采样5帧」生成采样点'); return; }
+  
+  const btn = document.getElementById('ocr-btn-' + label);
+  const status = document.getElementById('ocr-status-' + label);
+  btn.disabled = true;
+  btn.textContent = '⏳ 初始化…';
+  
+  const ok = await ocrInit();
+  if (!ok) {
+    status.textContent = '❌ Tesseract 加载失败';
+    btn.disabled = false; btn.textContent = '🔍 Tesseract OCR';
+    return;
+  }
+  
+  let success = 0, fail = 0;
+  
+  for (let i = 0; i < s.pts.length; i++) {
+    const pt = s.pts[i];
+    if (pt.timerValue !== '' && pt.timerValue != null) { success++; continue; }
+    
+    status.textContent = `⏳ 识别第 ${i+1}/${s.pts.length} 帧…`;
+    await new Promise(r => setTimeout(r, 10));
+    
+    try {
+      const r = await ocrOneFrame(label, pt.videoTime);
+      // 如果第一帧失败，重试一次
+      if (r.value === null) {
+        const r2 = await ocrOneFrame(label, pt.videoTime + 0.05);
+        if (r2.value !== null) { r.value = r2.value; r.confidence = r2.confidence; }
+      }
+      
+      const inp = document.getElementById(`cal-input-${label}-${i}`);
+      
+      if (r.value != null) {
+        pt.timerValue = r.value;
+        if (inp) {
+          inp.value = r.value.toFixed(3);
+          inp.style.background = '';
+          inp.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+        success++;
+      } else {
+        fail++;
+        if (inp) { inp.placeholder = '⚠️ 无法识别'; inp.style.background = '#2a1010'; }
+      }
+      drawOneCalPreview(label, i);
+    } catch (e) {
+      fail++;
+    }
+  }
+  
+  status.textContent = `✅ 完成: ${success} 成功${fail > 0 ? `, ${fail} 失败` : ''}`;
+  
+  btn.disabled = false;
+  btn.textContent = '🔍 Tesseract OCR';
+  
+  updateRegression(label);
+  if (fail === 0) buildIndex(label);
 }
 </script>
 </body>
