@@ -949,24 +949,28 @@ function renderCalTable(label) {
   updateCalButton(label);
 }
 
-// ─── 校准帧截图（复用单 video 元素，避免 iOS Safari 并发解码限制）───
+// ─── 校准帧截图（逐 video URL 独立元素 + seek 串行化）───
 
-let _capVid = null;
+let _capPool = {};  // 按 videoUrl 缓存临时 video 元素
+let _capSeq = {};   // 按 videoUrl 维护 seek 串行队列
 
 function captureFrameDataUrl(videoUrl, time, roi) {
-  return new Promise((resolve) => {
-    // 复用单个临时 video，不再每次新建
-    if (!_capVid) {
-      _capVid = document.createElement('video');
-      _capVid.muted = true;
-      _capVid.preload = 'auto';
-    }
-    const vid = _capVid;
-    
+  // 每个 URL 独立元素，避免 A/B 互相干扰
+  if (!_capPool[videoUrl]) {
+    _capPool[videoUrl] = document.createElement('video');
+    _capPool[videoUrl].muted = true;
+    _capPool[videoUrl].preload = 'auto';
+    _capPool[videoUrl].src = videoUrl;
+    _capPool[videoUrl].load();
+    _capSeq[videoUrl] = Promise.resolve();
+  }
+  const vid = _capPool[videoUrl];
+  
+  // 串行化同一视频的 seek，防止 iOS Safari 并发崩溃
+  return _capSeq[videoUrl] = _capSeq[videoUrl].then(() => new Promise((resolve) => {
     let settled = false;
     function done(dataUrl) { if (!settled) { settled = true; resolve(dataUrl); } }
     
-    // 3 秒超时防止卡死
     const timeout = setTimeout(() => done(null), 3000);
     
     vid.addEventListener('loadedmetadata', () => {
@@ -984,15 +988,8 @@ function captureFrameDataUrl(videoUrl, time, roi) {
       done(c.toDataURL());
     }, { once: true });
     
-    // 如果视频源已变，重新加载
-    if (vid.src !== videoUrl) {
-      vid.removeAttribute('src');
-      vid.src = videoUrl;
-      vid.load();
-    }
-    // 同一视频源，直接 seek
-    setTimeout(() => { if (!settled) vid.currentTime = Math.max(0, Math.min(time, vid.duration || 0)); }, 10);
-  });
+    vid.currentTime = Math.max(0, Math.min(time, vid.duration || 0));
+  }));
 }
 
 async function drawCalPreviews(label) {
