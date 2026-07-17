@@ -109,6 +109,7 @@
     display: block;
     cursor: crosshair;
     user-select: none;
+    touch-action: none;
   }
   .frame-preview .roi-overlay {
     position: absolute; border: 2px solid var(--accent);
@@ -738,9 +739,12 @@ function setupROIDrag(label) {
   const canvas = document.getElementById('roi-canvas-' + label);
   const overlay = document.getElementById('roi-overlay-' + label);
 
-  function getPct(e) {
+  function getXY(e) {
     const rect = canvas.getBoundingClientRect();
-    return { x: (e.clientX - rect.left) / rect.width * 100, y: (e.clientY - rect.top) / rect.height * 100 };
+    // 支持 touch 和 mouse 事件
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return { x: (clientX - rect.left) / rect.width * 100, y: (clientY - rect.top) / rect.height * 100 };
   }
   function updateOverlay() {
     const { sx, sy, ex, ey } = roiDrag;
@@ -750,19 +754,15 @@ function setupROIDrag(label) {
     overlay.style.width = w + '%'; overlay.style.height = h + '%';
     overlay.style.display = (w > 0.5 && h > 0.5) ? 'block' : 'none';
   }
-
-  canvas.addEventListener('mousedown', (e) => {
-    e.preventDefault();
-    const p = getPct(e);
-    roiDrag = { active: true, label, sx: p.x, sy: p.y, ex: p.x, ey: p.y };
-  });
-  document.addEventListener('mousemove', (e) => {
+  function startDrag(x, y) {
+    roiDrag = { active: true, label, sx: x, sy: y, ex: x, ey: y };
+  }
+  function moveDrag(x, y) {
     if (!roiDrag.active || roiDrag.label !== label) return;
-    const p = getPct(e);
-    roiDrag.ex = p.x; roiDrag.ey = p.y;
+    roiDrag.ex = x; roiDrag.ey = y;
     updateOverlay();
-  });
-  document.addEventListener('mouseup', () => {
+  }
+  function endDrag() {
     if (!roiDrag.active || roiDrag.label !== label) return;
     roiDrag.active = false;
     const { sx, sy, ex, ey } = roiDrag;
@@ -776,7 +776,17 @@ function setupROIDrag(label) {
     updateStepIndicators();
     showCalSection();
     drawROIZoom(label);
-  });
+  }
+
+  // 鼠标事件
+  canvas.addEventListener('mousedown', (e) => { e.preventDefault(); const p = getXY(e); startDrag(p.x, p.y); });
+  document.addEventListener('mousemove', (e) => { const p = getXY(e); moveDrag(p.x, p.y); });
+  document.addEventListener('mouseup', endDrag);
+
+  // 触摸事件
+  canvas.addEventListener('touchstart', (e) => { e.preventDefault(); const p = getXY(e); startDrag(p.x, p.y); }, { passive: false });
+  document.addEventListener('touchmove', (e) => { const p = getXY(e); moveDrag(p.x, p.y); }, { passive: false });
+  document.addEventListener('touchend', (e) => { e.preventDefault(); endDrag(); }, { passive: false });
 }
 
 function useDefaultROI(label) {
