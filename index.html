@@ -949,29 +949,49 @@ function renderCalTable(label) {
   updateCalButton(label);
 }
 
-// ─── Draw calibration previews (independent <img> + temp video) ───
+// ─── 校准帧截图（复用单 video 元素，避免 iOS Safari 并发解码限制）───
+
+let _capVid = null;
 
 function captureFrameDataUrl(videoUrl, time, roi) {
   return new Promise((resolve) => {
-    const vid = document.createElement('video');
-    vid.muted = true;
-    vid.preload = 'auto';
-    // 先注册事件，再设 src/load
+    // 复用单个临时 video，不再每次新建
+    if (!_capVid) {
+      _capVid = document.createElement('video');
+      _capVid.muted = true;
+      _capVid.preload = 'auto';
+    }
+    const vid = _capVid;
+    
+    let settled = false;
+    function done(dataUrl) { if (!settled) { settled = true; resolve(dataUrl); } }
+    
+    // 3 秒超时防止卡死
+    const timeout = setTimeout(() => done(null), 3000);
+    
     vid.addEventListener('loadedmetadata', () => {
       vid.currentTime = Math.max(0, Math.min(time, vid.duration));
     }, { once: true });
+    
     vid.addEventListener('seeked', () => {
+      clearTimeout(timeout);
       const vw = vid.videoWidth || 640, vh = vid.videoHeight || 360;
       const rx = roi.x / 100 * vw, ry = roi.y / 100 * vh;
       const rw = roi.w / 100 * vw, rh = roi.h / 100 * vh;
       const c = document.createElement('canvas');
       c.width = 160; c.height = 36;
       c.getContext('2d').drawImage(vid, rx, ry, rw, rh, 0, 0, 160, 36);
-      resolve(c.toDataURL());
-      vid.remove();
+      done(c.toDataURL());
     }, { once: true });
-    vid.src = videoUrl;
-    vid.load();
+    
+    // 如果视频源已变，重新加载
+    if (vid.src !== videoUrl) {
+      vid.removeAttribute('src');
+      vid.src = videoUrl;
+      vid.load();
+    }
+    // 同一视频源，直接 seek
+    setTimeout(() => { if (!settled) vid.currentTime = Math.max(0, Math.min(time, vid.duration || 0)); }, 10);
   });
 }
 
