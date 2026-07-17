@@ -783,10 +783,10 @@ function setupROIDrag(label) {
   document.addEventListener('mousemove', (e) => { const p = getXY(e); moveDrag(p.x, p.y); });
   document.addEventListener('mouseup', endDrag);
 
-  // 触摸事件
+  // 触摸事件（只阻止 canvas 上的默认行为，不干扰页面其他按钮）
   canvas.addEventListener('touchstart', (e) => { e.preventDefault(); const p = getXY(e); startDrag(p.x, p.y); }, { passive: false });
-  document.addEventListener('touchmove', (e) => { const p = getXY(e); moveDrag(p.x, p.y); }, { passive: false });
-  document.addEventListener('touchend', (e) => { e.preventDefault(); endDrag(); }, { passive: false });
+  document.addEventListener('touchmove', (e) => { const p = getXY(e); moveDrag(p.x, p.y); }, { passive: true });
+  document.addEventListener('touchend', (e) => { endDrag(); }, { passive: true });
 }
 
 function useDefaultROI(label) {
