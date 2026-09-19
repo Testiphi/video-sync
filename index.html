@@ -212,6 +212,14 @@
   }
   .micro-adjust .offset-label { color: var(--text-dim); }
 
+  .playback-controls {
+    display: flex; justify-content: center; align-items: center;
+    gap: 8px; padding: 4px 0 10px;
+  }
+  .playback-controls button {
+    min-width: 130px;
+  }
+
   .step-badge {
     display: inline-flex; align-items: center; gap: 4px;
     font-size: 11px; padding: 2px 8px;
@@ -438,6 +446,9 @@
         </div>
       </div>
       <div class="current-time" id="current-timer">00:00.000</div>
+      <div class="playback-controls">
+        <button class="green" id="sync-play-btn" onclick="toggleSyncPlayback()">▶ 同步播放</button>
+      </div>
       <div class="slider-area">
         <input type="range" id="sync-slider" min="0" max="1000" value="0" step="1"
                oninput="onSliderChange(this.value)">
@@ -488,6 +499,11 @@ let syncTimerTarget = 0;
 let syncTimerMin = 0;
 let syncTimerMax = 60;
 let syncSteps = 1000;
+let syncPlaying = false;
+let syncAnimationFrame = null;
+let syncPlaybackStartedAt = 0;
+let syncPlaybackStartTimer = 0;
+let syncPlayGeneration = 0;
 
 // ─── Helpers ───
 function fmt(sec) {
@@ -630,6 +646,7 @@ function loadFileFromBlob(label, file) {
 function unloadVideo(label) {
   const s = V[label];
   if (s.pts.length > 0 && s.pts.some(p => p.timerValue) && !confirm('重新选择视频将丢失当前校准数据，确定？')) return;
+  pauseSyncPlayback();
 
   s.loaded = false; s.fileName = ''; s.duration = 0;
   s.roi = null; s.pts = []; s.reg = null; s.offset = 0;
@@ -1110,6 +1127,7 @@ function buildIndex(label) {
 // ─── Step 4: Sync Viewer ───
 
 function checkSyncReady() {
+  pauseSyncPlayback();
   const ra = V.a.reg, rb = V.b.reg;
   if (!ra || !rb) { document.getElementById('viewer').classList.remove('active'); return; }
 
@@ -1163,6 +1181,7 @@ function checkSyncReady() {
 function getSyncTime(label, timerVal) { return V[label].reg ? V[label].reg.a * timerVal + V[label].reg.b : 0; }
 
 function onSliderChange(val) {
+  pauseSyncPlayback();
   const pct = val / syncSteps;
   syncTimerTarget = syncTimerMin + (syncTimerMax - syncTimerMin) * pct;
   document.getElementById('current-timer').textContent = fmt(syncTimerTarget);
@@ -1180,8 +1199,106 @@ function updateSyncDisplay() {
   }
 }
 
-function fineTune(delta) { V.b.offset += delta; document.getElementById('offset-val').textContent = (V.b.offset >= 0 ? '+' : '') + V.b.offset.toFixed(3) + 's'; updateSyncDisplay(); }
-function resetOffset() { V.b.offset = 0; document.getElementById('offset-val').textContent = '+0.000s'; updateSyncDisplay(); }
+function setSyncTimerDisplay(timerVal) {
+  syncTimerTarget = Math.max(syncTimerMin, Math.min(timerVal, syncTimerMax));
+  const pct = (syncTimerTarget - syncTimerMin) / Math.max(syncTimerMax - syncTimerMin, 0.001);
+  document.getElementById('sync-slider').value = Math.round(pct * syncSteps);
+  document.getElementById('current-timer').textContent = fmt(syncTimerTarget);
+  for (const label of ['a', 'b']) {
+    document.getElementById('sync-time-' + label).textContent =
+      fmt(getSyncTime(label, syncTimerTarget) + V[label].offset);
+    document.getElementById('sync-timer-' + label).textContent = fmt(syncTimerTarget);
+  }
+}
+
+function seekSyncVideo(label, timerVal) {
+  const vid = document.getElementById('sync-vid-' + label);
+  const target = Math.max(0, Math.min(getSyncTime(label, timerVal) + V[label].offset, vid.duration));
+  return new Promise((resolve) => {
+    if (Math.abs(vid.currentTime - target) < 0.005) { resolve(); return; }
+    const done = () => resolve();
+    vid.addEventListener('seeked', done, { once: true });
+    vid.currentTime = target;
+  });
+}
+
+function pauseSyncPlayback() {
+  syncPlayGeneration++;
+  syncPlaying = false;
+  if (syncAnimationFrame != null) cancelAnimationFrame(syncAnimationFrame);
+  syncAnimationFrame = null;
+  for (const label of ['a', 'b']) {
+    const vid = document.getElementById('sync-vid-' + label);
+    if (vid) vid.pause();
+  }
+  const btn = document.getElementById('sync-play-btn');
+  if (btn) { btn.disabled = false; btn.textContent = '▶ 同步播放'; }
+}
+
+async function toggleSyncPlayback() {
+  if (syncPlaying) { pauseSyncPlayback(); return; }
+  if (!V.a.reg || !V.b.reg) return;
+
+  if (syncTimerTarget >= syncTimerMax - 0.001) {
+    syncTimerTarget = syncTimerMin;
+    updateSyncDisplay();
+  }
+
+  const generation = ++syncPlayGeneration;
+  const btn = document.getElementById('sync-play-btn');
+  btn.disabled = true;
+  btn.textContent = '准备播放…';
+
+  try {
+    await Promise.all(['a', 'b'].map(label => seekSyncVideo(label, syncTimerTarget)));
+    if (generation !== syncPlayGeneration) return;
+
+    for (const label of ['a', 'b']) {
+      const vid = document.getElementById('sync-vid-' + label);
+      vid.playbackRate = Math.max(0.0625, Math.min(16, V[label].reg.a));
+    }
+    await Promise.all(['a', 'b'].map(label => document.getElementById('sync-vid-' + label).play()));
+    if (generation !== syncPlayGeneration) return;
+
+    syncPlaying = true;
+    syncPlaybackStartTimer = syncTimerTarget;
+    syncPlaybackStartedAt = performance.now();
+    btn.disabled = false;
+    btn.textContent = '⏸ 暂停播放';
+    renderSyncPlayback();
+  } catch (err) {
+    pauseSyncPlayback();
+    alert('无法同时播放两个视频：' + (err && err.message ? err.message : err));
+  }
+}
+
+function renderSyncPlayback() {
+  if (!syncPlaying) return;
+  const timerVal = syncPlaybackStartTimer + (performance.now() - syncPlaybackStartedAt) / 1000;
+  if (timerVal >= syncTimerMax) {
+    setSyncTimerDisplay(syncTimerMax);
+    pauseSyncPlayback();
+    updateSyncDisplay();
+    return;
+  }
+
+  setSyncTimerDisplay(timerVal);
+  for (const label of ['a', 'b']) {
+    const vid = document.getElementById('sync-vid-' + label);
+    const desired = getSyncTime(label, syncTimerTarget) + V[label].offset;
+    if (desired < 0 || desired > vid.duration) {
+      pauseSyncPlayback();
+      return;
+    }
+    // 浏览器解码造成明显漂移时拉回当前对齐位置。
+    if (Math.abs(vid.currentTime - desired) > 0.12) vid.currentTime = desired;
+    drawVideoToCanvas(vid, document.getElementById('sync-canvas-' + label));
+  }
+  syncAnimationFrame = requestAnimationFrame(renderSyncPlayback);
+}
+
+function fineTune(delta) { pauseSyncPlayback(); V.b.offset += delta; document.getElementById('offset-val').textContent = (V.b.offset >= 0 ? '+' : '') + V.b.offset.toFixed(3) + 's'; updateSyncDisplay(); }
+function resetOffset() { pauseSyncPlayback(); V.b.offset = 0; document.getElementById('offset-val').textContent = '+0.000s'; updateSyncDisplay(); }
 
 // ─── Zoom Modal ───
 
@@ -1204,6 +1321,7 @@ function updateStepIndicators() {
 
 function resetAll() {
   if (!confirm('确定重置全部？')) return;
+  pauseSyncPlayback();
   for (const label of ['a', 'b']) {
     if (V[label].url) { URL.revokeObjectURL(V[label].url); V[label].url = null; }
     V[label].loaded = false; V[label].fileName = ''; V[label].duration = 0;
