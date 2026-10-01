@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>FrameSync — 视频同帧同步对比</title>
-<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/tesseract.js@5.1.1/dist/tesseract.min.js"></script>
 <style>
   :root {
     --bg: #0f1117;
@@ -65,6 +65,8 @@
     transition: border-color .2s;
   }
   input:focus { border-color: var(--accent); }
+  select { background:#12141e; color:var(--text); border:1px solid var(--border); border-radius:4px; padding:6px; }
+  .row label { font-size:12px; color:var(--text-dim); }
 
   button {
     background: var(--accent);
@@ -359,11 +361,22 @@
 
   <!-- Step 3: Calibration -->
   <div id="cal-section" style="display:none;">
+    <div class="panel" style="margin-bottom:12px;">
+      <div class="row">
+        <label>计时格式 <select id="ocr-format"><option value="minutes">分:秒</option><option value="seconds">总秒数</option><option value="auto">自动判断</option></select></label>
+        <label>小数位 <select id="ocr-digits"><option value="3">3 位</option><option value="2">2 位</option><option value="1">1 位</option><option value="0">无小数</option></select></label>
+        <label>识别模型 <select id="ocr-model"><option value="standard">标准</option><option value="best">精度优先（更慢）</option></select></label>
+        <label>最低置信度 <input id="ocr-confidence" type="number" value="80" min="0" max="100" style="width:70px;">%</label>
+        <label>允许误差 <input id="ocr-tolerance" type="number" value="50" min="5" max="1000" style="width:80px;">毫秒</label>
+        <label>视频秒 / 计时秒 <input id="ocr-rate" type="number" value="1" min="0.05" max="16" step="0.01" style="width:70px;"></label>
+      </div>
+      <div class="meta">框选完整计时器并保留少量边距。普通速度视频保持比率为 1；变速视频请调整比率。低置信度、暂停或冲突结果会保留为待确认。</div>
+    </div>
     <div class="grid">
       <div class="panel" id="cal-panel-a">
         <h2>视频 A <span class="label-a">· 校准</span></h2>
         <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">
-          👇 点击「采样5帧」生成随机画面 → 在每帧预览中读取计时器数值并填入 → 满足2个点后构建索引
+          点击「采样5帧」覆盖不同时间段，识别后检查待确认项，也可以手动标注。
         </div>
         <div class="row">
           <button onclick="autoSample('a')">🎲 采样5帧</button>
@@ -386,6 +399,8 @@
         </table>
         <div class="row">
           <button class="green" onclick="buildIndex('a')" id="build-a" disabled>构建索引</button>
+          <button class="secondary" onclick="ocrCompareModels('a')">对比两种模型</button>
+          <button class="secondary" onclick="ocrExportReport('a')">导出识别报告</button>
         </div>
         <div class="ocr-status" id="ocr-status-a">🔍 点击「Tesseract OCR」自动识别计时器</div>
         <div class="meta" id="cal-meta-a">等待校准</div>
@@ -393,7 +408,7 @@
       <div class="panel" id="cal-panel-b">
         <h2>视频 B <span class="label-b">· 校准</span></h2>
         <div style="font-size:12px;color:var(--text-dim);margin-bottom:8px;">
-          👇 点击「采样5帧」生成随机画面 → 在每帧预览中读取计时器数值并填入 → 满足2个点后构建索引
+          点击「采样5帧」覆盖不同时间段，识别后检查待确认项，也可以手动标注。
         </div>
         <div class="row">
           <button onclick="autoSample('b')">🎲 采样5帧</button>
@@ -416,6 +431,8 @@
         </table>
         <div class="row">
           <button class="green" onclick="buildIndex('b')" id="build-b" disabled>构建索引</button>
+          <button class="secondary" onclick="ocrCompareModels('b')">对比两种模型</button>
+          <button class="secondary" onclick="ocrExportReport('b')">导出识别报告</button>
         </div>
         <div class="ocr-status" id="ocr-status-b">🔍 点击「Tesseract OCR」自动识别计时器</div>
         <div class="meta" id="cal-meta-b">等待校准</div>
@@ -548,12 +565,15 @@ function drawROIZoom(label) {
   const vw = vid.videoWidth, vh = vid.videoHeight;
   const rx = roi.x / 100 * vw, ry = roi.y / 100 * vh;
   const rw = roi.w / 100 * vw, rh = roi.h / 100 * vh;
+  zoomCanvas.height = Math.max(1, Math.round(zoomCanvas.width * rh / rw));
   ctx.drawImage(vid, rx, ry, rw, rh, 0, 0, zoomCanvas.width, zoomCanvas.height);
 }
 
 // ─── Step 1: Load Video (from path) ───
 
 function loadVideo(label) {
+  if (OCR.busy) return;
+  delete OCR.reports[label];
   const pathEl = document.getElementById('path-' + label);
   const path = pathEl.value.trim();
   if (!path) { alert('请输入视频路径'); return; }
@@ -598,6 +618,8 @@ function loadVideo(label) {
 // ─── Load from File (blob URL) ───
 
 function loadFileFromBlob(label, file) {
+  if (OCR.busy) return;
+  delete OCR.reports[label];
   const ext = file.name.split('.').pop().toLowerCase();
   if (!['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(ext)) { alert('不支持的视频格式: .' + ext); return; }
 
@@ -644,6 +666,8 @@ function loadFileFromBlob(label, file) {
 }
 
 function unloadVideo(label) {
+  if (OCR.busy) return;
+  delete OCR.reports[label];
   const s = V[label];
   if (s.pts.length > 0 && s.pts.some(p => p.timerValue) && !confirm('重新选择视频将丢失当前校准数据，确定？')) return;
   pauseSyncPlayback();
@@ -772,6 +796,7 @@ function setupROIDrag(label) {
     overlay.style.display = (w > 0.5 && h > 0.5) ? 'block' : 'none';
   }
   function startDrag(x, y) {
+    if (OCR.busy) return;
     roiDrag = { active: true, label, sx: x, sy: y, ex: x, ey: y };
   }
   function moveDrag(x, y) {
@@ -782,11 +807,13 @@ function setupROIDrag(label) {
   function endDrag() {
     if (!roiDrag.active || roiDrag.label !== label) return;
     roiDrag.active = false;
+    if (OCR.busy) return;
     const { sx, sy, ex, ey } = roiDrag;
     const x = Math.min(sx, ex), y = Math.min(sy, ey);
     const w = Math.abs(ex - sx), h = Math.abs(ey - sy);
     if (w < 1 || h < 1) return;
     V[label].roi = { x, y, w, h };
+    ocrInvalidateROI(label);
     document.getElementById('roi-meta-' + label).textContent =
       `已选: x=${x.toFixed(1)}% y=${y.toFixed(1)}% w=${w.toFixed(1)}% h=${h.toFixed(1)}%`;
     document.getElementById('roi-meta-' + label).style.color = 'var(--accent2)';
@@ -809,6 +836,7 @@ function setupROIDrag(label) {
 function useDefaultROI(label) {
   const { x, y, w, h } = DEFAULT_ROI;
   V[label].roi = { x, y, w, h };
+  ocrInvalidateROI(label);
   const overlay = document.getElementById('roi-overlay-' + label);
   overlay.style.left = x + '%'; overlay.style.top = y + '%';
   overlay.style.width = w + '%'; overlay.style.height = h + '%';
@@ -820,6 +848,7 @@ function useDefaultROI(label) {
 
 function resetROI(label) {
   V[label].roi = null;
+  ocrInvalidateROI(label);
   document.getElementById('roi-overlay-' + label).style.display = 'none';
   document.getElementById('roi-meta-' + label).textContent = '未设置';
   document.getElementById('roi-meta-' + label).style.color = '';
@@ -841,7 +870,7 @@ function showCalSection() {
   }
 }
 
-// ─── Auto Sample: 5 random frames ───
+// ─── Auto Sample: one point per time segment ───
 
 function autoSample(label) {
   const s = V[label];
@@ -855,7 +884,7 @@ function autoSample(label) {
 
   for (let i = 0; i < n; i++) {
     for (let attempt = 0; attempt < 50; attempt++) {
-      const t = safeStart + Math.random() * (safeEnd - safeStart);
+      const t = safeStart + (i + 0.25 + Math.random() * 0.5) / n * (safeEnd - safeStart);
       // Round to millisecond precision to avoid near-duplicates
       const key = Math.round(t * 1000);
       if (!usedTimes.has(key)) {
@@ -879,11 +908,11 @@ function addCalPoint(label) {
   const vid = document.getElementById('vid-' + label);
   if (!s.loaded || !s.roi) { alert('请先加载视频并框选计时器区域'); return; }
   const inp = document.getElementById('cal-inp-' + label);
-  const timerVal = parseFloat(inp.value);
-  if (isNaN(timerVal) || timerVal < 0) { alert('请输入有效的计时器数值（秒）'); return; }
+  const timerVal = Number(inp.value);
+  if (!inp.value.trim() || !Number.isFinite(timerVal) || timerVal < 0) { alert('请输入有效的计时器数值（秒）'); return; }
   const videoTime = vid.currentTime;
   if (s.pts.find(p => Math.abs(p.videoTime - videoTime) < 0.01)) { alert('该视频时间点已添加过校准点'); return; }
-  s.pts.push({ videoTime, timerValue: timerVal });
+  s.pts.push({ videoTime, timerValue: timerVal, origin: 'manual' });
   renderCalTable(label);
   updateRegression(label);
   inp.value = '';
@@ -897,12 +926,17 @@ function removeCalPoint(label, idx) {
 
 function updateCalTimer(label, idx, val) {
   val = val.trim();
-  V[label].pts[idx].timerValue = val ? parseFloat(val) : '';
+  const value = val ? Number(val) : NaN;
+  const pt = V[label].pts[idx];
+  pt.timerValue = Number.isFinite(value) && value >= 0 ? value : '';
+  pt.origin = 'manual';
+  pt.ocrReview = null;
   const okEl = document.getElementById('cal-ok-' + label + '-' + idx);
   if (okEl) {
-    okEl.textContent = val ? '✓' : '◌';
-    okEl.style.color = val ? 'var(--accent2)' : 'var(--text-dim)';
+    okEl.textContent = pt.timerValue !== '' ? '✓' : '◌';
+    okEl.style.color = pt.timerValue !== '' ? 'var(--accent2)' : 'var(--text-dim)';
   }
+  renderCalTable(label);
   updateCalButton(label);
   updateRegression(label);
 }
@@ -928,6 +962,9 @@ function resampleFrame(label, idx) {
 
   s.pts[idx].videoTime = newTime;
   s.pts[idx].timerValue = '';
+  s.pts[idx].ocrReview = null;
+  s.pts[idx].ocr = null;
+  s.pts[idx].origin = null;
   renderCalTable(label);
   updateRegression(label);
   drawCalPreviews(label);
@@ -946,8 +983,8 @@ function renderCalTable(label) {
       <td style="vertical-align:middle;">${i+1}</td>
       <td style="text-align:center;vertical-align:middle;width:120px;">
         <img id="cal-preview-img-${label}-${i}"
-             src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
-             style="border-radius:4px;width:120px;height:27px;cursor:pointer;background:#111;object-fit:cover"
+             src="${p.ocr?.frameDataUrl || 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'}"
+             style="border-radius:4px;width:120px;height:40px;cursor:pointer;background:#111;object-fit:contain"
              onclick="jumpToCalFrame('${label}', ${i})" title="点击跳转到该帧">
       </td>
       <td>
@@ -956,10 +993,12 @@ function renderCalTable(label) {
                onchange="updateCalTimer('${label}', ${i}, this.value)"
                style="width:100px;padding:4px 6px;font-size:12px;">
       </td>
-      <td><span class="ok" id="cal-ok-${label}-${i}">${hasVal ? '✓' : '◌'}</span></td>
+      <td><span class="ok" id="cal-ok-${label}-${i}">${p.ocrReview ? '待确认' : hasVal ? '✓' : '◌'}</span>
+        ${p.ocrReview ? `<div style="font-size:10px;color:var(--text-dim)">${ocrEscape(p.ocrReview.reason)}${p.ocrReview.value != null ? ' · 候选 ' + p.ocrReview.value.toFixed(3) + 's' : ''}</div>` : ''}</td>
       <td style="white-space:nowrap;">
         <button class="secondary" style="font-size:10px;padding:1px 6px;" onclick="resampleFrame('${label}', ${i})">🎲</button>
         <button class="danger" style="font-size:10px;padding:1px 6px;" onclick="removeCalPoint('${label}', ${i})">✕</button>
+        ${hasVal || p.ocrReview?.value != null ? `<button class="secondary" style="font-size:10px;padding:1px 6px;" onclick="ocrConfirmPoint('${label}', ${i})">确认</button>` : ''}
       </td>
     </tr>`;
   }).join('');
@@ -1000,8 +1039,8 @@ function captureFrameDataUrl(videoUrl, time, roi) {
       const rx = roi.x / 100 * vw, ry = roi.y / 100 * vh;
       const rw = roi.w / 100 * vw, rh = roi.h / 100 * vh;
       const c = document.createElement('canvas');
-      c.width = 160; c.height = 36;
-      c.getContext('2d').drawImage(vid, rx, ry, rw, rh, 0, 0, 160, 36);
+      c.width = 160; c.height = Math.max(1, Math.round(160 * rh / rw));
+      c.getContext('2d').drawImage(vid, rx, ry, rw, rh, 0, 0, c.width, c.height);
       done(c.toDataURL());
     }, { once: true });
     
@@ -1015,7 +1054,7 @@ async function drawCalPreviews(label) {
   if (!pts.length || !roi) return;
   for (let i = 0; i < pts.length; i++) {
     const img = document.getElementById('cal-preview-img-' + label + '-' + i);
-    if (img) {
+    if (img && !pts[i].ocr?.frameDataUrl) {
       img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'; // 1px transparent loading
       const dataUrl = await captureFrameDataUrl(V[label].url, pts[i].videoTime, roi);
       if (document.getElementById('cal-preview-img-' + label + '-' + i) === img) {
@@ -1030,7 +1069,7 @@ async function drawOneCalPreview(label, idx) {
   const roi = V[label].roi;
   if (!pt || !roi) return;
   const img = document.getElementById('cal-preview-img-' + label + '-' + idx);
-  if (img) {
+  if (img && !pt.ocr?.frameDataUrl) {
     img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
     const dataUrl = await captureFrameDataUrl(V[label].url, pt.videoTime, roi);
     if (document.getElementById('cal-preview-img-' + label + '-' + idx) === img) {
@@ -1040,6 +1079,7 @@ async function drawOneCalPreview(label, idx) {
 }
 
 function jumpToCalFrame(label, idx) {
+  if (OCR.busy) return;
   const time = V[label].pts[idx]?.videoTime;
   if (time == null) return;
   const vid = document.getElementById('vid-' + label);
@@ -1047,65 +1087,34 @@ function jumpToCalFrame(label, idx) {
 }
 
 function updateRegression(label) {
-  const pts = V[label].pts.filter(p => p.timerValue !== '' && p.timerValue != null);
+  const all = V[label].pts;
+  const pts = all.filter(p => p.timerValue !== '' && p.timerValue != null && Number.isFinite(Number(p.timerValue)));
   const calMeta = document.getElementById('cal-meta-' + label);
+  for (let i = 0; i < all.length; i++) {
+    const input = document.getElementById(`cal-input-${label}-${i}`);
+    if (input) input.style.background = all[i].ocrReview ? '#2a1010' : '';
+  }
   if (pts.length < 2) {
     V[label].reg = null;
     calMeta.textContent = `已采集 ${pts.length}/${V[label].pts.length} 个有效点，需要至少 2 个`;
-    document.getElementById(`build-${label}`).disabled = true;
+    updateCalButton(label);
+    checkSyncReady();
     return;
   }
-  
-  // Theil-Sen 稳健回归：取所有点对斜率的中位数
-  const slopes = [];
-  for (let i = 0; i < pts.length; i++) {
-    for (let j = i + 1; j < pts.length; j++) {
-      const dx = pts[j].timerValue - pts[i].timerValue;
-      if (Math.abs(dx) > 0.0001) {
-        slopes.push((pts[j].videoTime - pts[i].videoTime) / dx);
-      }
+  const fit = ocrFit(pts), tolerance = ocrTolerance(ocrGetSettings());
+  if (!fit) {
+    V[label].reg = null;
+    calMeta.textContent = '校准失败：计时器必须递增，并至少包含两个不同的计时值。';
+  } else {
+    const valid = fit.maxResidual <= tolerance;
+    V[label].reg = valid ? fit : null;
+    for (const point of pts) {
+      const residual = Math.abs(point.videoTime - fit.a * Number(point.timerValue) - fit.b);
+      const input = document.getElementById(`cal-input-${label}-${all.indexOf(point)}`);
+      if (input && residual > tolerance) input.style.background = '#3a1020';
     }
+    calMeta.textContent = `${valid ? '校准通过' : '校准待修正'}：${pts.length}点 · 视频 = ${fit.a.toFixed(6)}×计时器 + ${fit.b.toFixed(4)} · R²=${fit.r2.toFixed(4)} · 最大误差 ${(fit.maxResidual * 1000).toFixed(1)}ms（允许 ${(tolerance * 1000).toFixed(1)}ms）${pts.length === 2 ? ' · 只有两点，尚不能检查离群值' : ''}`;
   }
-  slopes.sort((a, b) => a - b);
-  const a = slopes.length > 0 ? slopes[Math.floor(slopes.length / 2)] : 0;
-  
-  // 截距中位数
-  const intercepts = pts.map(p => p.videoTime - a * p.timerValue);
-  intercepts.sort((a, b) => a - b);
-  const b = intercepts.length > 0 ? intercepts[Math.floor(intercepts.length / 2)] : 0;
-  
-  // R²
-  let ssr = 0, sst = 0;
-  const meanY = pts.reduce((s, p) => s + p.videoTime, 0) / pts.length;
-  for (const p of pts) {
-    const yp = a * p.timerValue + b;
-    ssr += (p.videoTime - yp) ** 2;
-    sst += (p.videoTime - meanY) ** 2;
-  }
-  const r2 = sst === 0 ? 1 : Math.max(0, 1 - ssr / sst);
-  V[label].reg = { a, b, r2 };
-  
-  // 离群点检测
-  let worstRes = 0, worstIdx = -1;
-  for (let i = 0; i < pts.length; i++) {
-    const p = pts[i];
-    const predicted = a * p.timerValue + b;
-    const res = Math.abs(p.videoTime - predicted);
-    if (res > worstRes) { worstRes = res; worstIdx = i; }
-  }
-  
-  let warnText = '';
-  if (worstRes > 1.0 && pts.length >= 3) {
-    // 定位到原始表索引
-    const origIdx = V[label].pts.findIndex(p => p === pts[worstIdx]);
-    warnText = ` ⚠️ 第${origIdx+1}点误差${worstRes.toFixed(1)}s，请检查`;
-    // 标红该行输入框
-    const inp = document.getElementById(`cal-input-${label}-${origIdx}`);
-    if (inp) inp.style.background = '#3a1020';
-  }
-  
-  calMeta.textContent =
-    `✅ 稳健回归: ${pts.length}点 · 视频 = ${a.toFixed(6)}×计时器 + ${b.toFixed(4)} · R²=${r2.toFixed(4)}${warnText}`;
   updateCalButton(label);
   checkSyncReady();
 }
@@ -1114,11 +1123,12 @@ function updateCalButton(label) {
   const valid = V[label].pts.filter(p => p.timerValue !== '' && p.timerValue != null).length;
   const btn = document.getElementById('build-' + label);
   if (valid >= 2 && V[label].reg) { btn.disabled = false; btn.textContent = `构建索引 (${valid}个有效点)`; }
-  else { btn.disabled = true; btn.textContent = `需要至少2个有效点 (已${valid}个)`; }
+  else { btn.disabled = true; btn.textContent = valid >= 2 ? '请修正校准误差' : `需要至少2个有效点 (已${valid}个)`; }
 }
 
 function buildIndex(label) {
   updateRegression(label);
+  if (!V[label].reg) return;
   document.getElementById('build-' + label).disabled = true;
   document.getElementById('build-' + label).textContent = '✅ 已完成';
   checkSyncReady();
@@ -1303,6 +1313,7 @@ function resetOffset() { pauseSyncPlayback(); V.b.offset = 0; document.getElemen
 // ─── Zoom Modal ───
 
 function zoomPreview(label, time) {
+  if (OCR.busy) return;
   const modal = document.getElementById('zoom-modal');
   const canvas = document.getElementById('zoom-canvas');
   const vid = document.getElementById('vid-' + label);
@@ -1320,9 +1331,11 @@ function updateStepIndicators() {
 }
 
 function resetAll() {
+  if (OCR.busy) return;
   if (!confirm('确定重置全部？')) return;
   pauseSyncPlayback();
   for (const label of ['a', 'b']) {
+    delete OCR.reports[label];
     if (V[label].url) { URL.revokeObjectURL(V[label].url); V[label].url = null; }
     V[label].loaded = false; V[label].fileName = ''; V[label].duration = 0;
     V[label].roi = null; V[label].pts = []; V[label].reg = null; V[label].offset = 0;
@@ -1356,86 +1369,70 @@ function resetAll() {
 const OCR = {
   worker: null,
   ready: false,
+  profile: null,
+  busy: false,
+  reports: {},
   debug: true,
 };
 
-async function ocrInit() {
-  if (OCR.ready) return true;
+async function ocrInit(profile = 'standard') {
+  if (OCR.ready && OCR.profile === profile) return true;
   try {
     if (typeof Tesseract === 'undefined') {
       console.warn('[OCR] Tesseract.js 未加载');
       return false;
     }
+    if (OCR.worker) await OCR.worker.terminate();
+    OCR.worker = null;
+    OCR.ready = false;
+    OCR.profile = null;
+    const options = profile === 'best' ? {
+      langPath: 'https://raw.githubusercontent.com/tesseract-ocr/tessdata_best/main',
+      gzip: false,
+      cachePath: 'framesync-best-v1',
+    } : { cachePath: 'framesync-standard-v1' };
     OCR.worker = await Tesseract.createWorker('eng', 1, {
+      ...options,
       logger: m => { if (m.status === 'loading tesseract core') console.log('[OCR] 加载内核…'); }
-    });
+    }, { load_system_dawg: '0', load_freq_dawg: '0' });
     await OCR.worker.setParameters({
       tessedit_char_whitelist: '0123456789.:',
-      tessedit_pageseg_mode: '8',  // 单个词 — 适合 MM:SS.mmm 格式
+      tessedit_pageseg_mode: '7',
     });
     OCR.ready = true;
+    OCR.profile = profile;
     console.log('[OCR] Tesseract 就绪');
     return true;
   } catch (e) {
+    if (OCR.worker) await OCR.worker.terminate().catch(() => {});
+    OCR.worker = null;
+    OCR.ready = false;
+    OCR.profile = null;
     console.error('[OCR] 初始化失败:', e);
     return false;
   }
 }
 
-// 解析 Tesseract 输出为秒数（鲁棒版）
+// 只接受完整、带分隔符的计时器，避免截取局部数字或猜测缺失的格式。
 function ocrParseTimer(text) {
-  if (!text || !text.trim()) return null;
-  
-  // 清理：去空格、全角冒号、非数字字符（保留 : 和 .）
-  let t = text.trim().replace(/\s+/g, '').replace(/：/g, ':');
-  
-  // 提取所有可能的 MM:SS.mmm / SS.mmm / SSS.mmm 格式
-  // 用正则一次性从文本中尽量提取合法计时器
-  const candidates = [];
-  
-  // 尝试匹配 MM:SS.mmm 或 MM:SS
-  const m1 = t.match(/(\d{1,2}):(\d{2})(?:\.(\d+))?/);
-  if (m1) {
-    const mm = parseInt(m1[1]);
-    const ss = parseInt(m1[2]);
-    const ms = m1[3] ? parseInt(m1[3].padEnd(3,'0').slice(0,3)) : 0;
-    if (mm < 60 && ss < 60) candidates.push(mm * 60 + ss + ms / 1000);
-    // 如果分钟过大但秒数合理，也作为候选
-    candidates.push(mm * 60 + ss + ms / 1000);
+  if (typeof text !== 'string') return null;
+  const t = text.trim().replace(/\s+/g, '').replace(/：/g, ':');
+
+  // M:SS / MM:SS，可带 1～3 位小数；秒字段必须小于 60。
+  const minuteTimer = t.match(/^(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?$/);
+  if (minuteTimer) {
+    const seconds = Number(minuteTimer[2]);
+    if (seconds >= 60) return null;
+    const fraction = minuteTimer[3] ? Number('0.' + minuteTimer[3]) : 0;
+    return Number(minuteTimer[1]) * 60 + seconds + fraction;
   }
-  
-  // 尝试匹配 SS.mmm 或 SS.m 等（无冒号）
-  const m2 = t.match(/(\d+)\.(\d+)/);
-  if (m2) {
-    const intP = parseInt(m2[1]);
-    const fracP = parseInt(m2[2].padEnd(3,'0').slice(0,3));
-    candidates.push(intP + fracP / 1000);
+
+  // 总秒数必须带小数点；纯数字缺少格式信息，交由人工确认。
+  if (/^\d+\.\d{1,3}$/.test(t)) {
+    const value = Number(t);
+    return Number.isFinite(value) ? value : null;
   }
-  
-  // 尝试纯数字（4-9位），按长度推断
-  const m3 = t.match(/(\d{4,9})/);
-  if (m3) {
-    const s = m3[1];
-    if (s.length === 7) {
-      candidates.push(parseInt(s.slice(0,2))*60 + parseInt(s.slice(2,4)) + parseInt(s.slice(4,7))/1000);
-    } else if (s.length >= 4) {
-      candidates.push(parseInt(s.slice(0,-3)) + parseInt(s.slice(-3))/1000);
-    }
-  }
-  
-  if (candidates.length === 0) return null;
-  
-  // 选最合理的值：在 0-3600 秒内且最接近中间值的那个
-  const valid = candidates.filter(v => v >= 0 && v < 3600);
-  if (valid.length === 0) return candidates[0];
-  if (valid.length === 1) return valid[0];
-  
-  // 多个候选：选值较小且不在极端范围的那个
-  // 排除极值（>1000s 通常是幻觉）
-  const plausible = valid.filter(v => v < 600);
-  if (plausible.length === 1) return plausible[0];
-  if (plausible.length > 1) plausible.sort((a,b) => a - b);
-  return plausible[0] || valid[0];
+  return null;
 }
 
 // 帧捕获（复用已加载的 video 元素，避免新建）
@@ -1443,50 +1440,91 @@ async function ocrGrabFrame(label, time) {
   const vid = document.getElementById('vid-' + label);
   const s = V[label];
   if (!vid || !vid.src || !s.roi) return null;
-  
-  const t = Math.max(0, Math.min(time, vid.duration - 0.001 || 0));
-  
-  // 强制在 seek 前暂停（解决连续 seek 跳过渲染的问题）
+  if (!Number.isFinite(time) || !Number.isFinite(vid.duration) || vid.duration <= 0) return null;
+
+  const t = Math.max(0, Math.min(time, Math.max(0, vid.duration - 0.001)));
+  const roi = { ...s.roi };
   vid.pause();
-  vid.currentTime = t;
-  
-  // 确保等待到实际的 seeked 事件
-  await new Promise(resolve => {
-    const to = setTimeout(resolve, 2000);
-    const onSeeked = () => { clearTimeout(to); resolve(); };
-    vid.addEventListener('seeked', onSeeked, { once: true });
-    // 如果已经是目标时间同时 seeked 也触发不了，用 RAF 兜底
+
+  return new Promise((resolve, reject) => {
+    let settled = false, seekComplete = false, frame = null, callbackId = null;
+    const hasFrameCallback = typeof vid.requestVideoFrameCallback === 'function';
+    const timeout = setTimeout(() => finish(new Error('帧捕获超时')), 2000);
+
+    function finish(error, result) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      vid.removeEventListener('seeked', onSeeked);
+      vid.removeEventListener('error', onError);
+      if (callbackId !== null && typeof vid.cancelVideoFrameCallback === 'function') {
+        vid.cancelVideoFrameCallback(callbackId);
+      }
+      if (error) reject(error); else resolve(result);
+    }
+
+    function capture(videoTime, timeSource, fromFrameCallback = false) {
+      if (!vid.videoWidth || !vid.videoHeight || (!fromFrameCallback &&
+          (vid.seeking || vid.readyState < 2 || Math.abs(vid.currentTime - t) > 0.000001))) {
+        throw new Error('视频帧尚未就绪或取帧位置已改变');
+      }
+      const vw = vid.videoWidth, vh = vid.videoHeight;
+      const crop = ocrCropGeometry(roi, vw, vh);
+      const c = document.createElement('canvas');
+      c.width = crop.width; c.height = crop.height;
+      c.getContext('2d').drawImage(vid, crop.x, crop.y, crop.w, crop.h,
+        0, 0, c.width, c.height);
+      return { canvas: c, videoTime, timeSource };
+    }
+
+    function onError() { finish(new Error('视频解码失败')); }
+
+    function onSeeked() {
+      if (settled) return;
+      seekComplete = true;
+      try {
+        if (vid.seeking || Math.abs(vid.currentTime - t) > 0.000001) {
+          throw new Error('取帧位置已改变');
+        }
+        if (!hasFrameCallback) finish(null, capture(vid.currentTime, 'currentTime'));
+        else if (frame) finish(null, frame);
+      } catch (error) { finish(error); }
+    }
+
+    function onFrame(now, metadata) {
+      callbackId = null;
+      if (settled) return;
+      // 新画面可能已经提交，但 seeking 标志尚未清除；先保存画面，等 seeked 再交付。
+      try {
+        if (!Number.isFinite(metadata.mediaTime)) throw new Error('视频帧时间无效');
+        frame = capture(metadata.mediaTime, 'mediaTime', true);
+        if (seekComplete) finish(null, frame);
+        else callbackId = vid.requestVideoFrameCallback(onFrame);
+      } catch (error) { finish(error); }
+    }
+
+    try {
+      // 同一位置的暂停画面不会产生新帧回调，也不需要再次 seek。
+      if (!vid.seeking && Math.abs(vid.currentTime - t) <= 0.000001 && vid.readyState >= 2) {
+        finish(null, capture(vid.currentTime, 'currentTime'));
+        return;
+      }
+      // 先订阅再 seek，避免漏掉事件或新帧回调。
+      vid.addEventListener('seeked', onSeeked);
+      vid.addEventListener('error', onError);
+      if (hasFrameCallback) callbackId = vid.requestVideoFrameCallback(onFrame);
+      vid.currentTime = t;
+    } catch (error) { finish(error); }
   });
-  
-  // 等两帧确保新画面已解码渲染
-  await new Promise(r => requestAnimationFrame(r));
-  await new Promise(r => requestAnimationFrame(r));
-  
-  const vw = vid.videoWidth || 640, vh = vid.videoHeight || 360;
-  const rx = s.roi.x / 100 * vw, ry = s.roi.y / 100 * vh;
-  const rw = s.roi.w / 100 * vw, rh = s.roi.h / 100 * vh;
-  
-  // 直接捕获到更大画布（不用中间 Image）
-  const c = document.createElement('canvas');
-  c.width = 640; c.height = 144;
-  c.getContext('2d').drawImage(vid, rx, ry, rw, rh, 0, 0, 640, 144);
-  return c;
 }
 
 // 单帧 OCR
 async function ocrOneFrame(label, time) {
   try {
-    const canvas = await ocrGrabFrame(label, time);
-    if (!canvas || canvas.width < 10) return { value: null, confidence: 0, debug: '帧捕获失败' };
+    const frame = await ocrGrabFrame(label, time);
+    if (!frame || frame.canvas.width < 10) return { value: null, confidence: 0, debug: '帧捕获失败' };
     
-    const { data } = await OCR.worker.recognize(canvas);
-    const text = (data.text || '').trim();
-    const confidence = (data.confidence || 0) / 100;
-    
-    if (OCR.debug) console.log(`[OCR] 原文: "${text}" 置信度: ${(confidence*100).toFixed(0)}%`);
-    
-    const value = ocrParseTimer(text);
-    return { value, confidence, debug: `"${text}"` };
+    return await ocrRecognizeFrame(frame, ocrGetSettings());
   } catch (e) {
     return { value: null, confidence: 0, debug: e.message };
   }
@@ -1494,67 +1532,9 @@ async function ocrOneFrame(label, time) {
 
 // 公共 API：识别所有采样点
 async function ocrAllSamples(label) {
-  const s = V[label];
-  if (!s.loaded || !s.roi) { alert('请先加载视频并框选计时器区域'); return; }
-  if (s.pts.length === 0) { alert('请先点击「采样5帧」生成采样点'); return; }
-  
-  const btn = document.getElementById('ocr-btn-' + label);
-  const status = document.getElementById('ocr-status-' + label);
-  btn.disabled = true;
-  btn.textContent = '⏳ 初始化…';
-  
-  const ok = await ocrInit();
-  if (!ok) {
-    status.textContent = '❌ Tesseract 加载失败';
-    btn.disabled = false; btn.textContent = '🔍 Tesseract OCR';
-    return;
-  }
-  
-  let success = 0, fail = 0;
-  
-  for (let i = 0; i < s.pts.length; i++) {
-    const pt = s.pts[i];
-    if (pt.timerValue !== '' && pt.timerValue != null) { success++; continue; }
-    
-    status.textContent = `⏳ 识别第 ${i+1}/${s.pts.length} 帧…`;
-    await new Promise(r => setTimeout(r, 10));
-    
-    try {
-      const r = await ocrOneFrame(label, pt.videoTime);
-      // 如果第一帧失败，重试一次
-      if (r.value === null) {
-        const r2 = await ocrOneFrame(label, pt.videoTime + 0.05);
-        if (r2.value !== null) { r.value = r2.value; r.confidence = r2.confidence; }
-      }
-      
-      const inp = document.getElementById(`cal-input-${label}-${i}`);
-      
-      if (r.value != null) {
-        pt.timerValue = r.value;
-        if (inp) {
-          inp.value = r.value.toFixed(3);
-          inp.style.background = '';
-          inp.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-        success++;
-      } else {
-        fail++;
-        if (inp) { inp.placeholder = '⚠️ 无法识别'; inp.style.background = '#2a1010'; }
-      }
-      drawOneCalPreview(label, i);
-    } catch (e) {
-      fail++;
-    }
-  }
-  
-  status.textContent = `✅ 完成: ${success} 成功${fail > 0 ? `, ${fail} 失败` : ''}`;
-  
-  btn.disabled = false;
-  btn.textContent = '🔍 Tesseract OCR';
-  
-  updateRegression(label);
-  if (fail === 0) buildIndex(label);
+  return ocrRunSamples(label);
 }
 </script>
+<script src="ocr.js"></script>
 </body>
 </html>
